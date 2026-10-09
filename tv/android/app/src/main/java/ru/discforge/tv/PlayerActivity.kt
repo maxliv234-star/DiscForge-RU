@@ -15,6 +15,8 @@ import androidx.media3.ui.PlayerView
 
 class PlayerActivity : Activity() {
     private var engine: ExoPlayer? = null
+    private var mediaId: String? = null
+    private val watchPrefs by lazy { getSharedPreferences("watch_progress", MODE_PRIVATE) }
     private lateinit var screen: PlayerView
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -38,10 +40,13 @@ class PlayerActivity : Activity() {
             val parsed = java.net.URI(url)
             ServerAddress.normalize("http://" + parsed.host + ":" + parsed.port)
         } catch (_: Exception) { null }
-        if (normalizedHost == null || !url.startsWith("$normalizedHost/api/v1/media/")) {
+        val id = url.substringAfterLast("/")
+        if (normalizedHost == null ||
+            !url.matches(Regex(Regex.escape(normalizedHost) + "/api/v1/media/[a-f0-9]{24}"))) {
             finish()
             return
         }
+        mediaId = id
         val http = DefaultHttpDataSource.Factory().setDefaultRequestProperties(
             mapOf("X-DiscForge-Token" to token))
         val sourceFactory = DefaultMediaSourceFactory(DefaultDataSource.Factory(this, http))
@@ -56,12 +61,27 @@ class PlayerActivity : Activity() {
             }
         })
         player.setMediaItem(MediaItem.fromUri(url))
+        val resumeAt = watchPrefs.getLong(id, 0)
+        if (WatchProgress.canResume(resumeAt)) {
+            player.seekTo(resumeAt)
+            android.widget.Toast.makeText(this, "Продолжить с сохранённого места",
+                android.widget.Toast.LENGTH_SHORT).show()
+        }
         player.prepare()
         player.playWhenReady = true
         screen.requestFocus()
     }
 
     override fun onStop() {
+        val active = engine
+        val id = mediaId
+        if (active != null && id != null && active.duration > 0) {
+            val bookmark = WatchProgress.bookmark(active.currentPosition, active.duration)
+            watchPrefs.edit().apply {
+                if (bookmark == null) remove(id) else putLong(id, bookmark)
+            }.apply()
+        }
+        mediaId = null
         screen.player = null
         engine?.release()
         engine = null
