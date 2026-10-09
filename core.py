@@ -55,7 +55,7 @@ def _run_probe(path: str, ffprobe: str = 'ffprobe') -> dict:
         p = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8',
                            errors='replace', timeout=45, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
     except FileNotFoundError as e:
-        raise DiscForgeError('Не найден ffprobe. Укажите путь к ffprobe.exe в настройках.') from e
+        raise DiscForgeError('Не найден ffprobe. Укажите путь к ffprobe в настройках.') from e
     except subprocess.TimeoutExpired as e:
         raise DiscForgeError('ffprobe не ответил за 45 секунд.') from e
     if p.returncode != 0:
