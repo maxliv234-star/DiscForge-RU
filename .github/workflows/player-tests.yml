@@ -1,0 +1,42 @@
+name: DiscForge Player tests
+on:
+  push:
+    paths:
+      - 'player/**'
+      - 'tests/test_player_backend.py'
+      - 'requirements-player.txt'
+      - '.github/workflows/player-tests.yml'
+  pull_request:
+    paths:
+      - 'player/**'
+      - 'tests/test_player_backend.py'
+      - 'requirements-player.txt'
+      - '.github/workflows/player-tests.yml'
+jobs:
+  player:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Test player source handling
+        run: python -m unittest discover -s tests -p 'test_player_backend.py' -v
+      - name: Compile player source
+        run: python -m py_compile player/backend.py player/app.py
+  gui-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Python GUI dependencies
+        run: python -m pip install -r requirements-player.txt
+      - name: Construct Qt player without a connected drive
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -c 'from PySide6.QtWidgets import QApplication; from player.app import Player; a=QApplication([]); w=Player(); print(w.windowTitle()); w.close()'
