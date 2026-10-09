@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import queue
 import re
 import shutil
 import subprocess
@@ -67,27 +68,45 @@ def _run_probe(path: str, ffprobe: str = 'ffprobe') -> dict:
 
 
 def parse_probe(path: str, data: dict) -> MediaInfo:
-    streams = data.get('streams', [])
-    videos = [s for s in streams if s.get('codec_type') == 'video' and not s.get('disposition', {}).get('attached_pic')]
+    if not isinstance(data, dict) or not isinstance(data.get('streams'), list):
+        raise DiscForgeError('ffprobe вернул некорректные данные о потоках.')
+    streams = [s for s in data['streams'] if isinstance(s, dict)]
+    videos = [s for s in streams if s.get('codec_type') == 'video' and not (
+        s.get('disposition', {}).get('attached_pic') if isinstance(s.get('disposition'), dict) else False
+    )]
     audios = [s for s in streams if s.get('codec_type') == 'audio']
     subs = [s for s in streams if s.get('codec_type') == 'subtitle']
     if not videos:
         raise DiscForgeError('В файле не обнаружен видеопоток.')
     v = videos[0]
-    fmt = data.get('format', {})
-    duration = float(fmt.get('duration') or v.get('duration') or 0)
+    fmt = data.get('format') or {}
+    if not isinstance(fmt, dict):
+        raise DiscForgeError('ffprobe вернул некорректные данные о файле.')
+    try:
+        duration = float(fmt.get('duration') or v.get('duration') or 0)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise DiscForgeError('Не удалось определить длительность фильма.') from exc
     if not math.isfinite(duration) or duration <= 0:
         raise DiscForgeError('Не удалось определить длительность фильма.')
     a = audios[0] if audios else {}
+    def nonnegative_int(value: object, label: str) -> int:
+        try:
+            result = int(value or 0)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise DiscForgeError(f'ffprobe вернул некорректное значение: {label}.') from exc
+        if result < 0:
+            raise DiscForgeError(f'ffprobe вернул некорректное значение: {label}.')
+        return result
+
     return MediaInfo(
         path=path, duration=duration,
-        size=int(fmt.get('size') or (os.path.getsize(path) if os.path.isfile(path) else 0)),
+        size=nonnegative_int(fmt.get('size') or (os.path.getsize(path) if os.path.isfile(path) else 0), 'размер'),
         video_codec=str(v.get('codec_name') or '?'),
-        width=int(v.get('width') or 0), height=int(v.get('height') or 0),
+        width=nonnegative_int(v.get('width'), 'ширина'), height=nonnegative_int(v.get('height'), 'высота'),
         video_fps=str(v.get('avg_frame_rate') or v.get('r_frame_rate') or '?'),
         video_color_transfer=str(v.get('color_transfer') or '').lower(),
         audio_codec=str(a.get('codec_name') or 'нет'),
-        audio_channels=int(a.get('channels') or 0),
+        audio_channels=nonnegative_int(a.get('channels'), 'аудиоканалы'),
         audio_tracks=len(audios), subtitle_tracks=len(subs),
     )
 
@@ -99,7 +118,7 @@ def probe_media(path: str, ffprobe: str = 'ffprobe') -> MediaInfo:
 def bitrate_plan(duration: float, profile: str, has_audio: bool) -> int:
     if profile not in CAPACITIES:
         raise DiscForgeError('Неизвестный профиль диска: ' + profile)
-    if duration <= 0:
+    if not math.isfinite(duration) or duration <= 0:
         raise DiscForgeError('Некорректная длительность.')
     # Leave 7% spare room for transport stream mux overhead, filesystem, menus and rate fluctuations.
     room = CAPACITIES[profile] * 0.93
@@ -197,16 +216,32 @@ def run_command(cmd: list[str], stage: str, pct_start: int, pct_width: int,
     except OSError as e:
         raise DiscForgeError(f'Не удаётся запустить {Path(cmd[0]).name}: {e}') from e
     errors = []
-    try:
+    output: queue.SimpleQueue[str | None] = queue.SimpleQueue()
+    def read_output() -> None:
         assert proc.stdout is not None
-        for raw in proc.stdout:
+        try:
+            for line in proc.stdout:
+                output.put(line)
+        finally:
+            output.put(None)
+    reader = threading.Thread(target=read_output, daemon=True)
+    reader.start()
+    try:
+        while True:
             if cancel.is_set():
                 proc.terminate()
                 try:
                     proc.wait(timeout=4)
                 except subprocess.TimeoutExpired:
                     proc.kill()
+                    proc.wait()
                 raise DiscForgeError('Операция отменена пользователем.')
+            try:
+                raw = output.get(timeout=0.1)
+            except queue.Empty:
+                continue
+            if raw is None:
+                break
             line = raw.strip()
             if line.startswith('out_time='):
                 try:
@@ -229,6 +264,9 @@ def run_command(cmd: list[str], stage: str, pct_start: int, pct_width: int,
         if proc.poll() is None:
             proc.kill()
             proc.wait()
+        reader.join(timeout=2)
+        if proc.stdout is not None:
+            proc.stdout.close()
 
 
 
