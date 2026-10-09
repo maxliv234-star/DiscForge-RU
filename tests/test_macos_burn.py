@@ -16,7 +16,7 @@ class MacBurnTests(unittest.TestCase):
     def test_iso_validation_and_command(self):
         with tempfile.TemporaryDirectory() as tmp:
             image = self.make_iso(tmp)
-            self.assertEqual(macos_burn.validate_image(image), image)
+            self.assertEqual(macos_burn.validate_image(image), image.resolve())
             cmd = macos_burn.burn_command(image, device="drive-1", speed=4)
             self.assertEqual(cmd[:2], ["hdiutil", "burn"])
             self.assertIn("-verifyburn", cmd)
