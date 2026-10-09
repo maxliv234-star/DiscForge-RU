@@ -16,6 +16,8 @@ import re
 import secrets
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from threading import Lock
+from time import monotonic
 from urllib.parse import urlsplit
 
 EXTENSIONS = {".mp4", ".m4v", ".mkv", ".mov", ".m2ts"}
@@ -72,6 +74,22 @@ def make_handler(root: Path, token: str):
     if not root.is_dir():
         raise ValueError("Media root must be a directory")
 
+    # Multiple parallel HTTP Range requests must not rescan an entire NAS on
+    # each request. An index is refreshed at most every five seconds; new
+    # files become visible automatically without restarting the server.
+    catalog_lock = Lock()
+    catalog_entries: dict[str, Path] = {}
+    catalog_updated_at = float("-inf")
+
+    def current_catalog() -> dict[str, Path]:
+        nonlocal catalog_entries, catalog_updated_at
+        with catalog_lock:
+            now = monotonic()
+            if now - catalog_updated_at >= 5.0:
+                catalog_entries = media_catalog(root)
+                catalog_updated_at = now
+            return catalog_entries
+
     class Handler(BaseHTTPRequestHandler):
         server_version = "DiscForge-TV/0.1"
         protocol_version = "HTTP/1.1"
@@ -96,7 +114,7 @@ def make_handler(root: Path, token: str):
             path = urlsplit(self.path).path
             if path == "/api/v1/library":
                 entries = []
-                for item_id, file in media_catalog(root).items():
+                for item_id, file in current_catalog().items():
                     try:
                         size = file.stat().st_size
                     except OSError:
@@ -114,7 +132,7 @@ def make_handler(root: Path, token: str):
                 if not re.fullmatch(r"[a-f0-9]{24}", identifier):
                     self.reply(404, b'{"error":"Not found"}')
                     return
-                file = media_catalog(root).get(identifier)
+                file = current_catalog().get(identifier)
                 if file is None:
                     self.reply(404, b'{"error":"Not found"}')
                     return
