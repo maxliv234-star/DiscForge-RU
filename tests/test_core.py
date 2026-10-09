@@ -1,8 +1,14 @@
+import argparse
+import sys
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 from core import (DiscForgeError, bitrate_plan, CAPACITIES, parse_probe,
-                  make_audio_command, make_video_command, write_meta, safe_name, unique_target)
+                  make_audio_command, make_video_command, write_meta, safe_name, unique_target,
+                  run_command)
+from cli import _chapter
 
 DATA = {'format': {'duration': '5400.12', 'size': '1500000000'}, 'streams': [
     {'codec_type': 'video', 'codec_name': 'h264', 'width': 1920, 'height': 1080,
@@ -26,6 +32,14 @@ class BackendTests(unittest.TestCase):
     def test_missing_video(self):
         with self.assertRaises(DiscForgeError):
             parse_probe('empty', {'format': {'duration': 12}, 'streams': []})
+    def test_invalid_probe_values_return_actionable_error(self):
+        for field, value in [('duration', 'broken'), ('size', 'broken')]:
+            data = {'format': {'duration': '12', 'size': '100'}, 'streams': [{'codec_type': 'video'}]}
+            data['format'][field] = value
+            with self.subTest(field=field), self.assertRaises(DiscForgeError):
+                parse_probe('film.mkv', data)
+        with self.assertRaises(DiscForgeError):
+            parse_probe('film.mkv', {'streams': 'broken'})
     def test_budget(self):
         b = bitrate_plan(5400, 'BD25', True)
         self.assertGreater(b, 5_000_000)
@@ -34,6 +48,25 @@ class BackendTests(unittest.TestCase):
     def test_too_long(self):
         with self.assertRaises(DiscForgeError):
             bitrate_plan(100_000, 'BD25', True)
+        for duration in (float('nan'), float('inf')):
+            with self.subTest(duration=duration), self.assertRaises(DiscForgeError):
+                bitrate_plan(duration, 'BD25', True)
+    def test_nonfinite_chapter_rejected_before_encoding(self):
+        for chapter in ('00:00:nan', '00:00:inf'):
+            with self.subTest(chapter=chapter), self.assertRaises(argparse.ArgumentTypeError):
+                _chapter(chapter)
+    def test_silent_encoder_can_be_cancelled(self):
+        cancel = threading.Event()
+        timer = threading.Timer(0.1, cancel.set)
+        timer.start()
+        started = time.monotonic()
+        try:
+            with self.assertRaisesRegex(DiscForgeError, 'отменена'):
+                run_command([sys.executable, '-c', 'import time; time.sleep(3)'],
+                            'Тест', 0, 100, 3, cancel, lambda _: None, lambda _: None)
+        finally:
+            timer.cancel()
+        self.assertLess(time.monotonic() - started, 1.5)
     def test_commands(self):
         v = make_video_command('ffmpeg', 'a.mkv', 'b.h264', 17000000, False)
         self.assertIn('bluray-compat=1', v)
