@@ -1,0 +1,40 @@
+name: DiscForge Player desktop builds
+on:
+  push:
+    paths:
+      - 'player/**'
+      - 'player_entry.py'
+      - 'requirements-player.txt'
+      - '.github/workflows/player-build.yml'
+  pull_request:
+    paths:
+      - 'player/**'
+      - 'player_entry.py'
+      - 'requirements-player.txt'
+      - '.github/workflows/player-build.yml'
+  workflow_dispatch:
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-15]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install build tools
+        run: python -m pip install -r requirements-player.txt pyinstaller
+      - name: Package player
+        run: pyinstaller --noconfirm --clean --windowed --name DiscForge_Player player_entry.py
+      - name: Upload unsigned test app
+        uses: actions/upload-artifact@v4
+        with:
+          name: DiscForge-Player-${{ matrix.os }}-unsigned
+          path: |
+            dist/DiscForge_Player/
+            dist/DiscForge_Player.app/
+          if-no-files-found: error
+          retention-days: 14
