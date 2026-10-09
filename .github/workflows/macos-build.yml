@@ -1,0 +1,26 @@
+name: macOS alpha build
+on:
+  push:
+    branches: [main, feature/macos-disc-burning]
+  pull_request:
+  workflow_dispatch:
+jobs:
+  macos:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Unit tests
+        run: python -m unittest discover -s tests -v
+      - name: Install UI + packaging
+        run: python -m pip install -r requirements.txt pyinstaller
+      - name: Build macOS app
+        run: python -m PyInstaller --clean --noconfirm --windowed --name DiscForge-RU main.py
+      - name: Pack .app
+        run: ditto -c -k --sequesterRsrc --keepParent dist/DiscForge-RU.app DiscForge-RU-macOS.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DiscForge-RU-macOS-unsigned
+          path: DiscForge-RU-macOS.zip

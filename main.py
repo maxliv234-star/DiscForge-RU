@@ -1,4 +1,4 @@
-"""DiscForge RU: first Windows desktop alpha, requires PySide6 and external tools.
+"""DiscForge RU: cross-platform desktop alpha, requires PySide6 and external tools.
 
 The alpha creates chapter-enabled BDMV/ISO but deliberately does NOT claim menu authoring.
 """
@@ -313,7 +313,7 @@ class Window(QMainWindow):
             path = QFileDialog.getExistingDirectory(self, 'Куда сохранять Blu-ray?')
         else:
             path, _ = QFileDialog.getOpenFileName(self, 'Путь к ' + key,
-                          filter='Исполняемые файлы (*.exe);;Все файлы (*)')
+                          filter=('Все файлы (*)' if sys.platform == 'darwin' else 'Исполняемые файлы (*.exe);;Все файлы (*)'))
         if path:
             self.path_fields[key].setText(path)
             self._save_config()
