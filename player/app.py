@@ -5,6 +5,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
     QHBoxLayout, QPushButton, QLabel, QFileDialog, QInputDialog, QMenu,
     QMessageBox, QSlider)
 from .backend import SourceError, bluray_uri, bdmv_uri, file_uri
+from .drives import optical_drives
 
 class Player(QMainWindow):
     def __init__(self):
@@ -96,6 +97,15 @@ class Player(QMainWindow):
             QMessageBox.warning(self, "Источник", str(exc))
 
     def open_disc(self):
+        drives = optical_drives()
+        if drives:
+            selected, accepted = QInputDialog.getItem(
+                self, "Привод Blu-ray", "Обнаруженные приводы:", drives + ["Другой путь…"], 0, False)
+            if not accepted:
+                return
+            if selected != "Другой путь…":
+                self.checked_open(bluray_uri, selected)
+                return
         default = "D:" if sys.platform == "win32" else "/Volumes/"
         path, ok = QInputDialog.getText(
             self, "Привод Blu-ray", "Буква привода (D:) либо путь к диску:", text=default)
