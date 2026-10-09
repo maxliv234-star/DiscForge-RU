@@ -5,6 +5,7 @@ import threading
 import unittest
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
@@ -90,6 +91,28 @@ class ServerTests(unittest.TestCase):
             self.request("/api/v1/media/../../private.txt",
                          {"X-DiscForge-Token": KEY})
         self.assertEqual(cm.exception.code, 404)
+
+    def test_catalog_cached_for_repeated_ranges_and_refreshed(self):
+        from tv_server import server as module
+        real_catalog = module.media_catalog
+        with patch.object(module, "media_catalog", wraps=real_catalog) as scan:
+            with self.request("/api/v1/library", {"X-DiscForge-Token": KEY}) as resp:
+                item = json.loads(resp.read())["items"][0]
+            for suffix in ("bytes=0-1", "bytes=3-5", "bytes=8-9"):
+                with self.request(item["url"], {"X-DiscForge-Token": KEY,
+                                                "Range": suffix}) as resp:
+                    self.assertEqual(resp.status, 206)
+                    resp.read()
+            self.assertEqual(scan.call_count, 1,
+                             "Reading several video chunks must not rescan the entire library")
+            # A fresh handler must see new media after a cache refresh.
+            # Replace monotonic rather than sleep so the test is fast.
+            with patch.object(module, "monotonic", return_value=float("inf")):
+                (self.root / "Другой.mp4").write_bytes(b"test")
+                with self.request("/api/v1/library", {"X-DiscForge-Token": KEY}) as resp:
+                    updated = json.loads(resp.read())["items"]
+            self.assertEqual(len(updated), 2)
+            self.assertEqual(scan.call_count, 2)
 
     def test_token_storage(self):
         path = self.root / "config" / "token"
