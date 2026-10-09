@@ -59,7 +59,7 @@ class Player(QMainWindow):
             if self.instance is None:
                 raise RuntimeError("Не удалось запустить LibVLC")
             self.engine = self.instance.media_player_new()
-        except (ImportError, OSError, RuntimeError) as exc:
+        except (ImportError, OSError, RuntimeError, NameError) as exc:
             self.label.setText("Нужен установленный VLC: " + str(exc))
 
     def button(self, row, name, callback):
