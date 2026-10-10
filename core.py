@@ -156,6 +156,24 @@ def make_audio_command(ffmpeg: str, src: str, dst: str, channels: int) -> list[s
             '-ar', '48000', '-ac', '6' if channels > 2 else '2', '-f', 'ac3', dst]
 
 
+def validate_chapters(chapters: Sequence[float], duration: float | None = None) -> None:
+    if not chapters:
+        raise DiscForgeError('Главы должны начинаться с отметки 00:00:00.')
+    try:
+        valid = all(not isinstance(t, bool) and isinstance(t, (int, float)) and
+                    math.isfinite(t) and t >= 0 for t in chapters)
+    except OverflowError:
+        valid = False
+    if not valid:
+        raise DiscForgeError('В списке глав есть недопустимая отметка.')
+    if chapters[0] != 0:
+        raise DiscForgeError('Главы должны начинаться с отметки 00:00:00.')
+    if any(b <= a for a, b in zip(chapters, chapters[1:])):
+        raise DiscForgeError('Отметки глав должны идти по возрастанию.')
+    if duration is not None and chapters[-1] >= duration:
+        raise DiscForgeError('Отметка главы должна быть меньше длительности фильма.')
+
+
 def write_meta(path: Path, video: Path, audio: Path | None,
                chapters: Sequence[float] | None = None) -> None:
     # Convert to slash separators; absolute paths are encoded as UTF-8 and quoted.
@@ -164,12 +182,7 @@ def write_meta(path: Path, video: Path, audio: Path | None,
     if chapters is None:
         opts = '--auto-chapters=10'
     else:
-        if not chapters or abs(chapters[0]) > 0.001:
-            raise DiscForgeError('Главы должны начинаться с отметки 00:00:00.')
-        if any(t < 0 or not math.isfinite(t) for t in chapters):
-            raise DiscForgeError('В списке глав есть недопустимая отметка.')
-        if any(b <= a for a, b in zip(chapters, chapters[1:])):
-            raise DiscForgeError('Отметки глав должны идти по возрастанию.')
+        validate_chapters(chapters)
         def fmt(sec: float) -> str:
             millis = round(sec * 1000)
             h, rest = divmod(millis, 3600000)
@@ -211,6 +224,8 @@ def run_command(cmd: list[str], stage: str, pct_start: int, pct_width: int,
                 duration: float, cancel: threading.Event,
                 log: Callable[[str], None], progress: Callable[[int], None]) -> None:
     log(f'{stage}...')
+    if cancel.is_set():
+        raise DiscForgeError('Операция отменена пользователем.')
     creationflags = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
     try:
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -256,7 +271,10 @@ def run_command(cmd: list[str], stage: str, pct_start: int, pct_width: int,
                 errors.append(line)
                 if len(errors) > 25:
                     errors.pop(0)
-        returncode = proc.wait()
+        while proc.poll() is None:
+            if cancel.wait(0.1):
+                raise DiscForgeError('Операция отменена пользователем.')
+        returncode = proc.returncode
         if cancel.is_set():
             raise DiscForgeError('Операция отменена пользователем.')
         if returncode != 0:
@@ -276,6 +294,8 @@ def run_command(cmd: list[str], stage: str, pct_start: int, pct_width: int,
 def run_tsmuxer(tsmuxer: str, meta: Path, destination: Path, cancel: threading.Event,
                  log: Callable[[str], None]) -> None:
     """Run tsMuxer with cancellation and bounded stderr capture."""
+    if cancel.is_set():
+        raise DiscForgeError('Операция отменена пользователем.')
     creationflags = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
     try:
         proc = subprocess.Popen([tsmuxer, str(meta), str(destination)],
@@ -313,6 +333,9 @@ def run_tsmuxer(tsmuxer: str, meta: Path, destination: Path, cancel: threading.E
         if proc.poll() is None:
             proc.kill()
             proc.wait()
+        reader.join(timeout=2)
+        if proc.stdout is not None:
+            proc.stdout.close()
 
 
 def create_bluray(info: MediaInfo, profile: str, output_root: str,
@@ -328,6 +351,10 @@ def create_bluray(info: MediaInfo, profile: str, output_root: str,
         raise DiscForgeError('Исходный файл не найден.')
     if info.is_hdr:
         raise DiscForgeError('HDR10/HLG пока не обрабатывается. Для этого файла нужен будущий UHD-модуль.')
+    if cancel.is_set():
+        raise DiscForgeError('Операция отменена пользователем.')
+    if chapters is not None:
+        validate_chapters(chapters, info.duration)
     _require_binary(ffmpeg, 'FFmpeg')
     _require_binary(tsmuxer, 'tsMuxeR')
     bitrate = bitrate_plan(info.duration, profile, info.audio_tracks > 0)

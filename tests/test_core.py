@@ -73,6 +73,19 @@ class BackendTests(unittest.TestCase):
         self.assertIn('libx264', v)
         self.assertIn('h264_nvenc', make_video_command('ffmpeg', 'a.mkv', 'b.h264', 17000000, True))
         self.assertIn('6', make_audio_command('ffmpeg', 'a.mkv', 'audio.ac3', 6))
+    def test_encoder_with_closed_output_can_be_cancelled(self):
+        cancel = threading.Event()
+        timer = threading.Timer(0.3, cancel.set)
+        timer.start()
+        started = time.monotonic()
+        try:
+            with self.assertRaisesRegex(DiscForgeError, 'отменена'):
+                run_command([sys.executable, '-c',
+                             'import os,time; os.close(1); os.close(2); time.sleep(3)'],
+                            'Тест', 0, 100, 3, cancel, lambda _: None, lambda _: None)
+        finally:
+            timer.cancel()
+        self.assertLess(time.monotonic() - started, 1.5)
     def test_meta(self):
         with tempfile.TemporaryDirectory() as temp:
             f = Path(temp) / 'test.meta'
@@ -92,6 +105,23 @@ if __name__ == '__main__':
     unittest.main()
 
 class AuthoringTests(unittest.TestCase):
+    def test_invalid_chapters_never_start_encoding(self):
+        from unittest.mock import patch
+        from core import create_bluray
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / 'movie.mkv'
+            source.touch()
+            info = parse_probe(str(source), DATA)
+            for chapters in ([], [5], [0, float('inf')], [0, info.duration], [0, 'bad'], [0, 10**400]):
+                with self.subTest(chapters=chapters), patch('core._require_binary'), \
+                     patch('core.run_command') as encode:
+                    with self.assertRaises(DiscForgeError):
+                        create_bluray(info, 'BD25', str(root), 'ffmpeg', 'tsmuxer', True,
+                                      False, threading.Event(), lambda _: None,
+                                      lambda _: None, chapters)
+                    encode.assert_not_called()
+
     def test_custom_chapters_written(self):
         with tempfile.TemporaryDirectory() as temp:
             f = Path(temp) / 'custom.meta'

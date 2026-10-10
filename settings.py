@@ -4,6 +4,7 @@ import json
 import os
 import sys
 import shutil
+import tempfile
 
 def config_dir(platform: str, home: Path, appdata: str | None) -> Path:
     if platform == 'darwin':
@@ -46,6 +47,22 @@ def load():
     return current
 
 
+def write_json(path: Path, value) -> None:
+    text = json.dumps(value, ensure_ascii=False, indent=2, allow_nan=False)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=path.parent,
+                                         prefix='.' + path.name + '.', delete=False) as stream:
+            temporary = Path(stream.name)
+            stream.write(text)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
 def save(value):
-    CFG.parent.mkdir(parents=True, exist_ok=True)
-    CFG.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding='utf-8')
+    write_json(CFG, value)

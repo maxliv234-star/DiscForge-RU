@@ -20,8 +20,8 @@ from PySide6.QtWidgets import (
 )
 
 from core import (CAPACITIES, SUPPORTED, DiscForgeError, MediaInfo,
-                  create_bluray, probe_media)
-from settings import load as load_settings, save as save_settings
+                  create_bluray, probe_media, validate_chapters)
+from settings import load as load_settings, save as save_settings, write_json
 
 VERSION = '0.1.0-alpha'
 
@@ -306,7 +306,10 @@ class Window(QMainWindow):
         return {key: edit.text().strip() for key, edit in self.path_fields.items()}
 
     def _save_config(self) -> None:
-        save_settings(self._config())
+        try:
+            save_settings(self._config())
+        except OSError as exc:
+            self._message('Не удалось сохранить настройки: ' + str(exc))
 
     def _choose_path(self, key: str) -> None:
         if key == 'output':
@@ -502,8 +505,12 @@ class Window(QMainWindow):
         path, _ = QFileDialog.getSaveFileName(self, 'Сохранить проект', 'DiscForge_project.dfr.json',
                                              'DiscForge RU (*.dfr.json)')
         if path:
-            Path(path).write_text(json.dumps(self._project_data(), ensure_ascii=False, indent=2), encoding='utf-8')
-            self._message('Проект сохранён: ' + path)
+            try:
+                write_json(Path(path), self._project_data())
+            except (OSError, ValueError) as exc:
+                QMessageBox.warning(self, 'Ошибка сохранения', str(exc))
+            else:
+                self._message('Проект сохранён: ' + path)
 
     def open_project(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, 'Открыть проект', '', 'DiscForge RU (*.dfr.json)')
@@ -517,21 +524,30 @@ class Window(QMainWindow):
             raw = data.get('chapters', {})
             if not isinstance(raw, dict):
                 raise ValueError('Неверный раздел глав')
+            # Validate everything before discarding the current project.
+            profile = data.get('profile', 'BD25')
+            if not isinstance(profile, str) or profile not in CAPACITIES:
+                raise ValueError('Неизвестный профиль диска')
+            loaded_chapters = {}
+            normalized_paths = []
+            for p in paths:
+                normalized = str(Path(p).resolve())
+                normalized_paths.append(normalized)
+                v = raw.get(p, [0.0])
+                if not isinstance(v, list):
+                    raise ValueError('Неверный список глав')
+                validate_chapters(v)
+                loaded_chapters[normalized] = [float(x) for x in v]
             if not self.new_project():
                 return
             self.menu_title.setText(str(data.get('title', 'Моя коллекция Blu-ray')))
-            if data.get('profile') in CAPACITIES:
-                self.profile.setCurrentText(data['profile'])
+            self.profile.setCurrentText(profile)
             self.encoder.setCurrentIndex(1 if data.get('encoder') == 1 else 0)
             self.output_mode.setCurrentIndex(0 if data.get('as_iso', True) else 1)
-            for p in paths:
-                v = raw.get(p)
-                if isinstance(v, list) and v and v[0] == 0 and all(isinstance(x, (int, float)) for x in v):
-                    if all(a < b for a, b in zip(v, v[1:])) and all(x >= 0 for x in v):
-                        self.chapters[p] = [float(x) for x in v]
-            self._queue_scan(paths)
+            self.chapters.update(loaded_chapters)
+            self._queue_scan(normalized_paths)
             self._message('Проект открыт: ' + path)
-        except (OSError, ValueError, TypeError) as exc:
+        except (OSError, ValueError, TypeError, OverflowError, DiscForgeError) as exc:
             QMessageBox.warning(self, 'Ошибка проекта', str(exc))
 
     def new_project(self) -> bool:
