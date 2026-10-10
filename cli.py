@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import json
+import math
 import sys
 import threading
 
@@ -17,7 +18,7 @@ def _chapter(value: str) -> float:
             raise ValueError()
         hours, mins = int(parts[0]), int(parts[1])
         secs = float(parts[2])
-        if hours < 0 or mins < 0 or mins > 59 or secs < 0 or secs >= 60:
+        if hours < 0 or mins < 0 or mins > 59 or not math.isfinite(secs) or secs < 0 or secs >= 60:
             raise ValueError()
         return 3600 * hours + 60 * mins + secs
     except ValueError as exc:
