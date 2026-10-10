@@ -79,6 +79,30 @@ class ServerTests(unittest.TestCase):
         with self.request(url, {"X-DiscForge-Token": KEY}) as resp:
             self.assertEqual(resp.read(), b"0123456789")
 
+    def test_categories_and_local_poster(self):
+        category = self.root / "Сериалы"
+        category.mkdir()
+        (category / "Эпизод.mkv").write_bytes(b"ABC")
+        (category / "Эпизод.jpg").write_bytes(b"fake-jpeg")
+        with self.request("/api/v1/library", {"X-DiscForge-Token": KEY}) as resp:
+            items = json.loads(resp.read())["items"]
+        episode = next(x for x in items if x["title"] == "Эпизод")
+        self.assertEqual(episode["category"], "Сериалы")
+        self.assertEqual(episode["poster"], "/api/v1/poster/" + episode["id"])
+        with self.request(episode["poster"], {"X-DiscForge-Token": KEY}) as resp:
+            self.assertEqual(resp.status, 200)
+            self.assertEqual(resp.read(), b"fake-jpeg")
+        with self.assertRaises(HTTPError) as cm:
+            self.request(episode["poster"])
+        self.assertEqual(cm.exception.code, 401)
+
+    def test_no_poster_path_disclosure(self):
+        identifier = next(iter(media_catalog(self.root)))
+        with self.assertRaises(HTTPError) as cm:
+            self.request("/api/v1/poster/" + identifier,
+                         {"X-DiscForge-Token": KEY})
+        self.assertEqual(cm.exception.code, 404)
+
     def test_range_rejected(self):
         identifier = next(iter(media_catalog(self.root)))
         with self.assertRaises(HTTPError) as cm:
