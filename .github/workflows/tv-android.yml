@@ -54,9 +54,15 @@ jobs:
       - name: Kotlin unit tests and assemble
         working-directory: tv/android
         run: gradle --no-daemon testDebugUnitTest assembleDebug
+      - name: Verify installable debug APK signature
+        shell: bash
+        run: |
+          sdk_root="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          "$sdk_root/build-tools/35.0.0/apksigner" verify --verbose \
+            tv/android/app/build/outputs/apk/debug/app-debug.apk
       - uses: actions/upload-artifact@v4
         with:
-          name: DiscForge-TV-Android-debug-unsigned
+          name: DiscForge-TV-Android-debug-signed
           path: tv/android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 14
