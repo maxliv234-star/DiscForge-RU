@@ -127,7 +127,7 @@ class AuthoringTests(unittest.TestCase):
                 (target / 'BDMV' / 'STREAM').mkdir(parents=True)
                 (target / 'BDMV' / 'STREAM' / '00000.m2ts').write_bytes(b'broken')
 
-            with patch('core._require_binary'), patch('core.run_command', side_effect=encode), \\
+            with patch('core._require_binary'), patch('core.run_command', side_effect=encode), \
                  patch('core.run_tsmuxer', side_effect=invalid_mux):
                 with self.assertRaisesRegex(DiscForgeError, 'Проверка BDMV не пройдена'):
                     create_bluray(info, 'BD25', str(root), 'ffmpeg', 'tsmuxer', False, False,
