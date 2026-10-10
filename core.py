@@ -17,6 +17,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Sequence
 
+from bdmv_preflight import inspect as inspect_bdmv
+
 SUPPORTED = {'.mkv', '.mp4', '.mov', '.m2ts', '.mts', '.ts', '.avi'}
 CAPACITIES = {'BD25': 25_000_000_000, 'BD50': 50_000_000_000, 'BDXL100': 100_000_000_000}
 HDR_TRANSFERS = {'smpte2084', 'arib-std-b67'}
@@ -364,6 +366,13 @@ def create_bluray(info: MediaInfo, profile: str, output_root: str,
                 raise DiscForgeError('tsMuxer не создал каталог BDMV.')
         if size > CAPACITIES[profile]:
             raise DiscForgeError(f'Размер результата {size / 1e9:.2f} ГБ превышает {profile}. Файлы болванки не затронуты.')
+        # Never publish an invalid Full HD folder as a ready-to-burn BDMV.
+        # ISO images require a separate UDF/ISO inspection and are not certified here.
+        if not iso and profile in ('BD25', 'BD50'):
+            report = inspect_bdmv(author_target, profile)
+            if not report.structurally_valid:
+                raise DiscForgeError('Проверка BDMV не пройдена: ' + '; '.join(report.errors[:8]))
+            log('Структурная проверка BDMV пройдена; совместимость с плеером не подтверждена.')
         shutil.move(str(author_target), str(target))
         progress(100)
         log(f'Готово: {target} ({size/1e9:.2f} ГБ).')

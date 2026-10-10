@@ -51,7 +51,7 @@ class MacBurnTests(unittest.TestCase):
     def test_dry_run_never_executes(self):
         with tempfile.TemporaryDirectory() as tmp:
             image = self.make_iso(tmp)
-            with patch("macos_burn.subprocess.run") as runner:
+            with patch("macos_burn.subprocess.run") as runner, patch("builtins.print"):
                 self.assertEqual(macos_burn.main(["burn", str(image), "--dry-run"]), 0)
                 runner.assert_not_called()
 
