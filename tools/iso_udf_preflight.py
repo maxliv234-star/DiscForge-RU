@@ -54,6 +54,16 @@ def _tag(block: bytes, lba: int) -> int:
     crc_expected = int.from_bytes(block[8:10], "little")
     if binascii.crc_hqx(block[16:16 + crc_length], 0) != crc_expected:
         raise ValueError("Descriptor CRC mismatch.")
+    # The CRC must cover every descriptor field used by this preflight.
+    # LVD's UDF domain identifier and revision end at byte offset 242.
+    if tag_id == 6 and crc_length < 226:
+        raise ValueError("LVD CRC does not cover the UDF domain revision.")
+    # The AVDP Main VDS extent is bytes 16:24, Reserve is bytes 24:32.
+    # An empty or short CRC would otherwise allow unchecked extent changes.
+    if tag_id == 2:
+        required = 16 if any(block[24:32]) else 8
+        if crc_length < required:
+            raise ValueError("Anchor CRC does not cover advertised VDS extents.")
     return tag_id
 
 

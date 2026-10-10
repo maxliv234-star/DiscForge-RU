@@ -85,6 +85,31 @@ class ISOUDFFullHDTests(unittest.TestCase):
             self.assertFalse(report.valid)
             self.assertTrue(any('Logical Volume Descriptor' in e for e in report.errors))
 
+    def test_rejects_lvd_crc_excluding_revision(self):
+        block = bytearray(descriptor(6, 32, bytes(226)))
+        block[8:12] = bytes(4)  # CRC 0 over zero bytes, checksum still valid.
+        block[4] = (sum(block[:4]) + sum(block[5:16])) % 256
+        with self.assertRaisesRegex(ValueError, 'LVD CRC'):
+            udf._tag(bytes(block), 32)
+
+    def test_rejects_anchor_crc_excluding_main_extent(self):
+        extent = (16 * udf.SECTOR_SIZE).to_bytes(4, 'little') + (32).to_bytes(4, 'little')
+        block = bytearray(descriptor(2, 256, extent))
+        block[8:12] = bytes(4)
+        block[4] = (sum(block[:4]) + sum(block[5:16])) % 256
+        with self.assertRaisesRegex(ValueError, 'Anchor CRC'):
+            udf._tag(bytes(block), 256)
+
+    def test_rejects_anchor_crc_excluding_reserve_extent(self):
+        main = (16 * udf.SECTOR_SIZE).to_bytes(4, 'little') + (32).to_bytes(4, 'little')
+        reserve = (16 * udf.SECTOR_SIZE).to_bytes(4, 'little') + (64).to_bytes(4, 'little')
+        block = bytearray(descriptor(2, 256, main + reserve))
+        block[8:10] = binascii.crc_hqx(main, 0).to_bytes(2, 'little')
+        block[10:12] = (8).to_bytes(2, 'little')
+        block[4] = (sum(block[:4]) + sum(block[5:16])) % 256
+        with self.assertRaisesRegex(ValueError, 'Anchor CRC'):
+            udf._tag(bytes(block), 256)
+
     def test_rejects_udf260(self):
         report = self.check(revision=0x0260)
         self.assertFalse(report.valid)
