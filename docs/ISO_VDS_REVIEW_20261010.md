@@ -4,7 +4,7 @@ Scope: Full HD BD25/BD50 only. This review applies to draft PR #16.
 
 ## Verified implementation gap
 
-The current ISO inspector checks the primary or backup **Anchor Volume Descriptor Pointer** (AVDP), but reads only the **Main Volume Descriptor Sequence** (Main VDS) described by that anchor. It does not attempt the separate **Reserve Volume Descriptor Sequence** (Reserve VDS) extent. Consequently, an ISO with a damaged Main VDS and intact Reserve VDS is rejected even though the backup metadata may be usable.
+Before the Reserve VDS fix, the ISO inspector checked the primary or backup **Anchor Volume Descriptor Pointer** (AVDP), but reads only the **Main Volume Descriptor Sequence** (Main VDS) described by that anchor. It did not attempt the separate **Reserve Volume Descriptor Sequence** (Reserve VDS) extent. Consequently, such an ISO with a damaged Main VDS and intact Reserve VDS was rejected even though the backup metadata may be usable.
 
 The backup AVDP and the Reserve VDS are different recovery mechanisms. Do not claim both are covered by a backup-anchor test.
 
@@ -22,4 +22,4 @@ The backup AVDP and the Reserve VDS are different recovery mechanisms. Do not cl
 
 Synthetic fixtures and green CI cannot establish a mountable filesystem, correct BDMV directory tree, valid Blu-ray menus, or standalone player compatibility. Validate a real generated ISO with a UDF-aware mount/inspection tool, burn a BD-RE using ASUS BW-16D1HT, verify readback, and test navigation on a household player before making those claims.
 
-Do not merge this note as evidence that Reserve VDS fallback is implemented; it documents a pending improvement.
+Reserve VDS fallback and three synthetic regression tests were added in commit 22f3a1fa. This review remains a release checklist, not proof of mountability or physical player compatibility.
