@@ -26,6 +26,9 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_tv_server.py' -v
       - name: Compile server
         run: python -m py_compile tv_server/server.py
+      - name: Syntax-check Mac launch agent installer
+        run: bash -n tv/macos/install_launchagent.sh
+
   android:
     name: Android TV debug APK
     runs-on: ubuntu-latest
@@ -66,3 +69,16 @@ jobs:
           path: tv/android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 14
+  nas-docker:
+    name: Synology Docker image smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image and verify server entrypoint
+        run: |
+          docker build -f tv/docker/Dockerfile -t discforge-tv:ci .
+          docker run --rm discforge-tv:ci --help
+      - name: Check Compose definition
+        run: |
+          cp tv/docker/.env.example tv/docker/.env
+          docker compose -f tv/docker/compose.yaml config --quiet
