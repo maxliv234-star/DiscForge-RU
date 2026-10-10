@@ -23,6 +23,7 @@ class MainActivity : Activity() {
     private lateinit var tokenInput: EditText
     private lateinit var status: TextView
     private lateinit var list: LinearLayout
+    private var catalogRequest = 0
     private val prefs by lazy { getSharedPreferences("connection", MODE_PRIVATE) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -81,6 +82,7 @@ class MainActivity : Activity() {
     }
 
     private fun loadCatalog() {
+        val request = ++catalogRequest
         val base = ServerAddress.normalize(serverInput.text.toString())
         val key = tokenInput.text.toString().trim()
         if (base == null || key.length < 16) {
@@ -103,23 +105,28 @@ class MainActivity : Activity() {
                     connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
                 } finally { connection.disconnect() }
                 val items = JSONObject(response).getJSONArray("items")
+                // Decode untrusted JSON on the worker, inside the error handler.
+                // Exceptions posted to the UI thread cannot be caught here.
+                val entries = (0 until items.length()).mapNotNull { index ->
+                    val item = items.getJSONObject(index)
+                    val id = item.getString("id")
+                    val path = item.getString("url")
+                    val title = item.getString("title")
+                    if (id.matches(Regex("[a-f0-9]{24}")) && path == "/api/v1/media/$id") {
+                        title to path
+                    } else null
+                }
                 runOnUiThread {
-                    if (isFinishing || isDestroyed) return@runOnUiThread
-                    status.text = "В библиотеке фильмов: " + items.length()
-                    if (items.length() == 0) {
+                    if (isFinishing || isDestroyed || request != catalogRequest) return@runOnUiThread
+                    status.text = "В библиотеке фильмов: " + entries.size
+                    if (entries.isEmpty()) {
                         list.addView(TextView(this).apply {
                             text = "Добавьте MP4/MKV в папку медиасервера на ПК."
                             setTextColor(Color.WHITE)
                             textSize = 20f
                         })
                     }
-                    for (index in 0 until items.length()) {
-                        val item = items.getJSONObject(index)
-                        val id = item.getString("id")
-                        val path = item.getString("url")
-                        if (!id.matches(Regex("[a-f0-9]{24}")) ||
-                            path != "/api/v1/media/$id") continue
-                        val title = item.getString("title")
+                    for ((title, path) in entries) {
                         list.addView(Button(this).apply {
                             text = "▶  $title"
                             isFocusable = true
@@ -136,7 +143,7 @@ class MainActivity : Activity() {
                 }
             } catch (exc: Exception) {
                 runOnUiThread {
-                    if (!isFinishing && !isDestroyed) {
+                    if (!isFinishing && !isDestroyed && request == catalogRequest) {
                         status.text = "Ошибка подключения: " + exc.message
                     }
                 }

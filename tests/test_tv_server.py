@@ -62,6 +62,11 @@ class ServerTests(unittest.TestCase):
             self.request("/api/v1/library")
         self.assertEqual(cm.exception.code, 401)
 
+    def test_non_ascii_token_is_unauthorized(self):
+        with self.assertRaises(HTTPError) as cm:
+            self.request('/api/v1/library', {'X-DiscForge-Token': '\u00e9' * 20})
+        self.assertEqual(cm.exception.code, 401)
+
     def test_library_and_stream(self):
         with self.request("/api/v1/library", {"X-DiscForge-Token": KEY}) as resp:
             self.assertEqual(resp.status, 200)
@@ -113,6 +118,49 @@ class ServerTests(unittest.TestCase):
                     updated = json.loads(resp.read())["items"]
             self.assertEqual(len(updated), 2)
             self.assertEqual(scan.call_count, 2)
+
+    def test_deleted_media_returns_404_for_stale_cached_entry(self):
+        with self.request("/api/v1/library", {"X-DiscForge-Token": KEY}) as resp:
+            url = json.loads(resp.read())["items"][0]["url"]
+        (self.root / "Фильм.mp4").unlink()
+        with self.assertRaises(HTTPError) as error:
+            self.request(url, {"X-DiscForge-Token": KEY})
+        self.assertEqual(error.exception.code, 404)
+
+    def test_replacement_symlink_cannot_leak_external_media(self):
+        with self.request("/api/v1/library", {"X-DiscForge-Token": KEY}) as resp:
+            url = json.loads(resp.read())["items"][0]["url"]
+        with tempfile.TemporaryDirectory() as outside:
+            secret = Path(outside) / "private.mp4"
+            secret.write_bytes(b"outside content")
+            path = self.root / "Фильм.mp4"
+            path.unlink()
+            try:
+                path.symlink_to(secret)
+            except (OSError, NotImplementedError):
+                self.skipTest("Symlinks cannot be created")
+            with self.assertRaises(HTTPError) as error:
+                self.request(url, {"X-DiscForge-Token": KEY})
+            self.assertEqual(error.exception.code, 404)
+
+    def test_parent_directory_symlink_replacement(self):
+        folder = self.root / "season"
+        folder.mkdir()
+        (folder / "episode.mp4").write_bytes(b"safe")
+        with self.request("/api/v1/library", {"X-DiscForge-Token": KEY}) as resp:
+            items = json.loads(resp.read())["items"]
+        url = next(item["url"] for item in items if item["title"] == "episode")
+        with tempfile.TemporaryDirectory() as outside:
+            (Path(outside) / "episode.mp4").write_bytes(b"secret")
+            (folder / "episode.mp4").unlink()
+            folder.rmdir()
+            try:
+                folder.symlink_to(outside, target_is_directory=True)
+            except (OSError, NotImplementedError):
+                self.skipTest("Directory symlinks unavailable")
+            with self.assertRaises(HTTPError) as error:
+                self.request(url, {"X-DiscForge-Token": KEY})
+            self.assertEqual(error.exception.code, 404)
 
     def test_token_storage(self):
         path = self.root / "config" / "token"
