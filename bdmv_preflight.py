@@ -31,6 +31,7 @@ def inspect(root: Path, profile: str = "BD25") -> Report:
     errors: list[str] = []
     warnings: list[str] = []
     counts: dict[str, int] = {}
+    collection_stems: dict[str, set[str]] = {}
     size = 0
     if profile not in CAPACITIES:
         errors.append("Only BD25/BD50 supported; UHD/BDXL deferred.")
@@ -70,9 +71,16 @@ def inspect(root: Path, profile: str = "BD25") -> Report:
             matches = (sorted(directory.glob(pattern))
                        if directory.is_dir() and not directory.is_symlink() else [])
             counts[name] = len(matches)
+            collection_stems[name] = {
+                path.stem for path in matches if path.is_file() and not path.is_symlink()
+                and len(path.stem) == 5 and path.stem.isascii() and path.stem.isdigit()
+            }
             if not matches:
                 errors.append(f"Missing BDMV/{name}/{pattern}")
             for path in matches:
+                if len(path.stem) != 5 or not path.stem.isascii() or not path.stem.isdigit():
+                    errors.append(f"Invalid five-digit Blu-ray filename: BDMV/{name}/{path.name}")
+                    continue
                 if path.is_symlink() or not path.is_file():
                     errors.append(f"Invalid BDMV/{name}/{path.name}")
                     continue
@@ -103,6 +111,13 @@ def inspect(root: Path, profile: str = "BD25") -> Report:
                                 errors.append(f"Unsupported Full HD metadata version: BDMV/{name}/{path.name}")
                 except OSError as exc:
                     errors.append(f"Cannot inspect {path.name}: {exc}")
+        # In a 2D Full HD BDMV set, every stream needs its same-numbered clip info.
+        clip_ids = collection_stems.get("CLIPINF", set())
+        stream_ids = collection_stems.get("STREAM", set())
+        for stem in sorted(stream_ids - clip_ids):
+            errors.append(f"Missing matching CLIPINF/{stem}.clpi for STREAM/{stem}.m2ts")
+        for stem in sorted(clip_ids - stream_ids):
+            errors.append(f"Missing matching STREAM/{stem}.m2ts for CLIPINF/{stem}.clpi")
         if not (bdmv / "BACKUP").is_dir():
             warnings.append("Missing BDMV/BACKUP; check redundant metadata.")
         if not (root / "CERTIFICATE").is_dir():

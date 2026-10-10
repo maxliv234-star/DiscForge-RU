@@ -33,6 +33,27 @@ class BDMVPreflightTests(unittest.TestCase):
             (root / "BDMV/PLAYLIST/00000.mpls").unlink()
             self.assertFalse(inspect(root).structurally_valid)
 
+    def test_rejects_nonstandard_blu_ray_filenames(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            fixture(root)
+            directory = root / "BDMV/PLAYLIST"
+            (directory / "00000.mpls").rename(directory / "movie.mpls")
+            result = inspect(root)
+            self.assertFalse(result.structurally_valid)
+            self.assertTrue(any("filename" in error for error in result.errors))
+
+    def test_clip_info_matches_the_stream_number(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            fixture(root)
+            directory = root / "BDMV/CLIPINF"
+            (directory / "00000.clpi").rename(directory / "00001.clpi")
+            result = inspect(root)
+            self.assertFalse(result.structurally_valid)
+            self.assertTrue(any("matching CLIPINF" in error for error in result.errors))
+            self.assertTrue(any("matching STREAM" in error for error in result.errors))
+
     def test_invalid_stream_size(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
