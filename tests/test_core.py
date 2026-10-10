@@ -92,8 +92,15 @@ class AuthoringTests(unittest.TestCase):
                 progress(pct_start + pct_width)
 
             def mux(binary, meta, target, cancel, log):
-                (target / 'BDMV' / 'STREAM').mkdir(parents=True)
-                (target / 'BDMV' / 'STREAM' / '00000.m2ts').write_bytes(b'fake')
+                bdmv = target / 'BDMV'
+                for section in ('STREAM', 'PLAYLIST', 'CLIPINF', 'BACKUP'):
+                    (bdmv / section).mkdir(parents=True)
+                (target / 'CERTIFICATE').mkdir()
+                for relative, magic in (
+                    ('index.bdmv', b'INDX'), ('MovieObject.bdmv', b'MOBJ'),
+                    ('PLAYLIST/00000.mpls', b'MPLS'), ('CLIPINF/00000.clpi', b'HDMV')):
+                    (bdmv / relative).write_bytes(magic + b'0200')
+                (bdmv / 'STREAM' / '00000.m2ts').write_bytes(bytes(4) + bytes([0x47]) + bytes(187))
 
             with patch('core._require_binary'), patch('core.run_command', side_effect=encode), \
                  patch('core.run_tsmuxer', side_effect=mux):
@@ -101,6 +108,32 @@ class AuthoringTests(unittest.TestCase):
                                        threading.Event(), lambda msg: None, lambda pct: None, chapters=[0.0])
             self.assertEqual(result.name, 'film_2')
             self.assertTrue((result / 'BDMV' / 'STREAM' / '00000.m2ts').exists())
+
+    def test_pipeline_rejects_invalid_bdmv_and_cleans_temporary(self):
+        import threading
+        from unittest.mock import patch
+        from core import create_bluray
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            video = root / 'film.mkv'
+            video.write_bytes(b'fake source')
+            info = parse_probe(str(video), DATA)
+            info = info.__class__(**{**vars(info), 'duration': 2.0})
+
+            def encode(command, *args):
+                Path(command[-1]).write_bytes(b'encoded')
+
+            def invalid_mux(binary, meta, target, cancel, log):
+                (target / 'BDMV' / 'STREAM').mkdir(parents=True)
+                (target / 'BDMV' / 'STREAM' / '00000.m2ts').write_bytes(b'broken')
+
+            with patch('core._require_binary'), patch('core.run_command', side_effect=encode), \\
+                 patch('core.run_tsmuxer', side_effect=invalid_mux):
+                with self.assertRaisesRegex(DiscForgeError, 'Проверка BDMV не пройдена'):
+                    create_bluray(info, 'BD25', str(root), 'ffmpeg', 'tsmuxer', False, False,
+                                  threading.Event(), lambda msg: None, lambda pct: None)
+            self.assertFalse((root / 'film').exists())
+            self.assertEqual(list(root.glob('DiscForge_work_*')), [])
 
     def test_pipeline_rejects_large_iso_and_cleans_temporary(self):
         import threading
