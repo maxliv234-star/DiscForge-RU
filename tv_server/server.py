@@ -275,7 +275,7 @@ def main(argv: list[str] | None = None) -> int:
     print("Только локальная сеть. Не открывайте порт на роутере!", flush=True)
     discovery = None
     if not args.no_discovery and args.host != "127.0.0.1":
-        discovery = start_discovery(args.discovery_port, args.port)
+        discovery = start_discovery(args.discovery_port, args.port, token)
     try:
         server.serve_forever(poll_interval=0.3)
     except KeyboardInterrupt:

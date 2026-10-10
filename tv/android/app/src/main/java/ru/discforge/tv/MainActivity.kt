@@ -186,7 +186,7 @@ class MainActivity : Activity() {
                 failure = exc
                 // UDP broadcasts carry NO token. Candidate servers are authenticated
                 // via the same existing HTTP token before a new IP is accepted.
-                for (candidate in LanDiscovery.discover()) {
+                for (candidate in LanDiscovery.discover(key)) {
                     if (candidate == base) continue
                     try {
                         result = requestLibrary(candidate, key)

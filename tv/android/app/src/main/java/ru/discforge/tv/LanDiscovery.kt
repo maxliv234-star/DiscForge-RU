@@ -4,32 +4,55 @@ import android.os.SystemClock
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
+import java.security.MessageDigest
+import java.security.SecureRandom
+import javax.crypto.Mac
+import javax.crypto.spec.SecretKeySpec
 
-/** Best-effort LAN discovery: no credentials are included in UDP packets. */
+/**
+ * Authenticate UDP advertisements with HMAC(token, fresh nonce).
+ * Do not send the token to unauthenticated peers even over HTTP.
+ */
 object LanDiscovery {
-    private const val REQUEST = "DISCFORGE_TV_DISCOVER_V1"
-    private const val RESPONSE = "DISCFORGE_TV_SERVER_V1:"
+    private const val REQUEST = "DISCFORGE_TV_DISCOVER_V2:"
+    private const val RESPONSE = "DISCFORGE_TV_SERVER_V2:"
     private const val PORT = 8099
 
-    fun parseReply(text: String, host: String): String? {
+    fun proof(token: String, nonce: String): String {
+        val mac = Mac.getInstance("HmacSHA256")
+        mac.init(SecretKeySpec(token.toByteArray(Charsets.UTF_8), "HmacSHA256"))
+        return mac.doFinal(nonce.toByteArray(Charsets.US_ASCII))
+            .take(16).joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
+    }
+
+    fun parseReply(text: String, host: String, token: String, nonce: String): String? {
         if (!text.startsWith(RESPONSE)) return null
-        val digits = text.removePrefix(RESPONSE)
-        if (digits.isEmpty() || digits.any { !it.isDigit() }) return null
-        val port = digits.toIntOrNull() ?: return null
+        val parts = text.removePrefix(RESPONSE).split(":")
+        if (parts.size != 2) return null
+        val port = parts[0].toIntOrNull() ?: return null
+        val advertised = parts[1]
+        if (!advertised.matches(Regex("[a-f0-9]{32}"))) return null
+        val expected = proof(token, nonce)
+        if (!MessageDigest.isEqual(advertised.toByteArray(Charsets.US_ASCII),
+                expected.toByteArray(Charsets.US_ASCII))) return null
         return ServerAddress.normalize(host + ":" + port)
     }
 
-    /** Call from worker thread, never UI. Saved token is verified via HTTP afterward. */
-    fun discover(): List<String> {
+    /** Best effort; some access points block LAN broadcast. */
+    fun discover(token: String): List<String> {
         val found = linkedSetOf<String>()
         try {
+            val nonceBytes = ByteArray(16)
+            SecureRandom().nextBytes(nonceBytes)
+            val nonce = nonceBytes.joinToString("") { byte ->
+                "%02x".format(byte.toInt() and 0xff)
+            }
             DatagramSocket().use { socket ->
                 socket.broadcast = true
                 socket.soTimeout = 350
-                val data = REQUEST.toByteArray(Charsets.US_ASCII)
+                val data = (REQUEST + nonce).toByteArray(Charsets.US_ASCII)
                 val query = DatagramPacket(data, data.size,
                     InetAddress.getByName("255.255.255.255"), PORT)
-                // Multiple broadcasts help on noisy home Wi-Fi.
                 socket.send(query)
                 socket.send(query)
                 val endAt = SystemClock.elapsedRealtime() + 1700L
@@ -40,7 +63,7 @@ object LanDiscovery {
                         socket.receive(reply)
                         val candidate = parseReply(
                             String(reply.data, reply.offset, reply.length, Charsets.US_ASCII),
-                            reply.address.hostAddress ?: "")
+                            reply.address.hostAddress ?: "", token, nonce)
                         if (candidate != null) found.add(candidate)
                     } catch (_: java.net.SocketTimeoutException) {
                         // Continue until deadline.
@@ -48,7 +71,7 @@ object LanDiscovery {
                 }
             }
         } catch (_: Exception) {
-            // Some Wi-Fi firmwares filter broadcast. Manual saved address still works.
+            // Saved server address and manual connect still work.
         }
         return found.toList()
     }
