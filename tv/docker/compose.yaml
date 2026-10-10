@@ -1,0 +1,17 @@
+services:
+  discforge-tv:
+    build:
+      context: ../..
+      dockerfile: tv/docker/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8098:8098/tcp"
+      - "8099:8099/udp"
+    volumes:
+      - "${DISCFORGE_MEDIA_PATH:?Set media path in .env}:/media:ro"
+      - "${DISCFORGE_CONFIG_PATH:?Set config path in .env}:/config"
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp

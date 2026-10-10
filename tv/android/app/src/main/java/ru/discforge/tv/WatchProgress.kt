@@ -21,4 +21,21 @@ object WatchProgress {
         if (positionMs >= durationMs || durationMs - positionMs <= FINISH_MARGIN_MS) return null
         return positionMs
     }
+
+    /** Stable through DHCP address changes; secret itself is never stored in a key name. */
+    fun bookmarkKeyByToken(token: String, mediaId: String): String {
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(token.toByteArray(Charsets.UTF_8))
+        val serverId = digest.take(12).joinToString("") { byte ->
+            "%02x".format(byte.toInt() and 0xff)
+        }
+        return "v2:" + serverId + ":" + mediaId
+    }
+
+    fun timeLabel(positionMs: Long): String {
+        val minutes = (positionMs.coerceAtLeast(0L) / 60_000L)
+        return (minutes / 60L).toString() + ":" +
+            (minutes % 60L).toString().padStart(2, '0')
+    }
+
 }

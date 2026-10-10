@@ -18,6 +18,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Lock
 from time import monotonic
+from tv_server.discovery import start_discovery
 from urllib.parse import urlsplit
 
 EXTENSIONS = {".mp4", ".m4v", ".mkv", ".mov", ".m2ts"}
@@ -65,6 +66,23 @@ def parse_range(value: str | None, size: int) -> tuple[int, int, bool]:
     if start >= size or end < start:
         raise ValueError("Range out of bounds")
     return start, end, True
+
+
+def poster_for(file: Path, root: Path) -> Path | None:
+    """Only serve a small local sidecar artwork file inside the media root."""
+    for candidate in (file.with_suffix(".jpg"), file.with_suffix(".png"),
+                      file.parent / "folder.jpg", file.parent / "folder.png"):
+        if candidate.is_symlink() or not candidate.is_file():
+            continue
+        resolved = candidate.resolve()
+        if not resolved.is_relative_to(root):
+            continue
+        try:
+            if resolved.stat().st_size <= 8 * 1024 * 1024:
+                return resolved
+        except OSError:
+            pass
+    return None
 
 
 def make_handler(root: Path, token: str):
@@ -119,12 +137,33 @@ def make_handler(root: Path, token: str):
                         size = file.stat().st_size
                     except OSError:
                         continue
+                    relative = file.relative_to(root)
+                    category = relative.parts[0] if len(relative.parts) > 1 else "Фильмы"
+                    artwork = poster_for(file, root)
                     entries.append({"id": item_id, "title": file.stem, "size": size,
+                                    "category": category,
+                                    "poster": "/api/v1/poster/" + item_id if artwork else None,
                                     "url": "/api/v1/media/" + item_id})
                 entries.sort(key=lambda row: row["title"].casefold())
                 payload = json.dumps({"version": 1, "items": entries},
                                      ensure_ascii=False).encode("utf-8")
                 self.reply(200, payload, "application/json; charset=utf-8")
+                return
+            poster_prefix = "/api/v1/poster/"
+            if path.startswith(poster_prefix):
+                identifier = path[len(poster_prefix):]
+                if not re.fullmatch(r"[a-f0-9]{24}", identifier):
+                    self.reply(404, b'{"error":"Not found"}')
+                    return
+                file = current_catalog().get(identifier)
+                artwork = poster_for(file, root) if file is not None else None
+                if artwork is None:
+                    self.reply(404, b'{"error":"Not found"}')
+                    return
+                try:
+                    self.send_media(artwork)
+                except OSError:
+                    self.close_connection = True
                 return
             prefix = "/api/v1/media/"
             if path.startswith(prefix):
@@ -215,22 +254,35 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--port", type=int, default=8098)
     parser.add_argument("--token-file",
                         default=str(Path.home() / ".discforge-tv" / "token"))
+    parser.add_argument("--no-print-token", action="store_true",
+                        help="Do not expose the pairing secret in unattended logs")
+    parser.add_argument("--no-discovery", action="store_true",
+                        help="Disable optional UDP LAN service discovery")
+    parser.add_argument("--discovery-port", type=int, default=8099)
     args = parser.parse_args(argv)
-    if not 1 <= args.port <= 65535:
-        parser.error("Invalid TCP port")
+    if not 1 <= args.port <= 65535 or not 1 <= args.discovery_port <= 65535:
+        parser.error("Invalid TCP/UDP port")
     root = Path(args.media_root).expanduser().resolve(strict=True)
     if not root.is_dir():
         parser.error("--media-root must be a directory")
     token = saved_token(Path(args.token_file).expanduser())
     server = ThreadingHTTPServer((args.host, args.port), make_handler(root, token))
     print(f"DiscForge TV: http://{args.host}:{server.server_port}", flush=True)
-    print(f"Код подключения для ТВ: {token}", flush=True)
+    if args.no_print_token:
+        print("Код подключения хранится в указанном --token-file", flush=True)
+    else:
+        print(f"Код подключения для ТВ: {token}", flush=True)
     print("Только локальная сеть. Не открывайте порт на роутере!", flush=True)
+    discovery = None
+    if not args.no_discovery and args.host != "127.0.0.1":
+        discovery = start_discovery(args.discovery_port, args.port, token)
     try:
         server.serve_forever(poll_interval=0.3)
     except KeyboardInterrupt:
         pass
     finally:
+        if discovery is not None:
+            discovery.close()
         server.server_close()
     return 0
 
