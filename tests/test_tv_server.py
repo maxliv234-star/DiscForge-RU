@@ -62,6 +62,11 @@ class ServerTests(unittest.TestCase):
             self.request("/api/v1/library")
         self.assertEqual(cm.exception.code, 401)
 
+    def test_non_ascii_token_is_unauthorized(self):
+        with self.assertRaises(HTTPError) as cm:
+            self.request('/api/v1/library', {'X-DiscForge-Token': '\u00e9' * 20})
+        self.assertEqual(cm.exception.code, 401)
+
     def test_library_and_stream(self):
         with self.request("/api/v1/library", {"X-DiscForge-Token": KEY}) as resp:
             self.assertEqual(resp.status, 200)

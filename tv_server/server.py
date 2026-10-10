@@ -144,8 +144,8 @@ def make_handler(root: Path, token: str):
                 self.wfile.write(data)
 
         def serve(self):
-            if self.headers.get(TOKEN_HEADER) is None or not hmac.compare_digest(
-                    self.headers.get(TOKEN_HEADER, ""), token):
+            if not hmac.compare_digest(
+                    self.headers.get(TOKEN_HEADER, "").encode('utf-8'), token.encode('utf-8')):
                 self.reply(401, b'{"error":"Unauthorized"}')
                 return
             path = urlsplit(self.path).path
@@ -213,6 +213,7 @@ def make_handler(root: Path, token: str):
                     while remaining:
                         chunk = stream.read(min(256 * 1024, remaining))
                         if not chunk:
+                            self.close_connection = True
                             break
                         self.wfile.write(chunk)
                         remaining -= len(chunk)
