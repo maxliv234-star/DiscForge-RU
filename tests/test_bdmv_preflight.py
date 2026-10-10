@@ -76,3 +76,13 @@ class BDMVPreflightTests(unittest.TestCase):
             result = inspect(root)
             self.assertTrue(result.structurally_valid)
             self.assertTrue(any("BACKUP" in warning for warning in result.warnings))
+
+
+    def test_metadata_version_rejected(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            fixture(root)
+            (root / "BDMV/index.bdmv").write_bytes(b"INDX0300")
+            result = inspect(root)
+            self.assertFalse(result.structurally_valid)
+            self.assertTrue(any("version" in e for e in result.errors))
