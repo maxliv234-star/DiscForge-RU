@@ -7,6 +7,15 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class WatchProgressTest {
+    @Test fun bookmarkIdentitySurvivesIpChanges() {
+        val one = WatchProgress.bookmarkKeyByToken("test-key-which-is-long-enough", "abcd")
+        val two = WatchProgress.bookmarkKeyByToken("test-key-which-is-long-enough", "abcd")
+        val another = WatchProgress.bookmarkKeyByToken("another-test-key-which-is-long", "abcd")
+        assertEquals(one, two)
+        assertFalse(one == another)
+        assertEquals("2:03", WatchProgress.timeLabel(7_380_000L))
+    }
+
     @Test fun bookmarksAreIsolatedPerServerAndFile() {
         val first = WatchProgress.bookmarkKey("http://192.168.1.10:8098", "abcd1234")
         val second = WatchProgress.bookmarkKey("http://192.168.1.20:8098", "abcd1234")

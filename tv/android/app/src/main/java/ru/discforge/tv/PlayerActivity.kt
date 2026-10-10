@@ -2,6 +2,8 @@ package ru.discforge.tv
 
 import android.app.Activity
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import androidx.media3.common.MediaItem
@@ -16,6 +18,23 @@ import androidx.media3.ui.PlayerView
 class PlayerActivity : Activity() {
     private var engine: ExoPlayer? = null
     private var mediaKey: String? = null
+    private val saveHandler = Handler(Looper.getMainLooper())
+    private val saveLoop = object : Runnable {
+        override fun run() {
+            persistPosition()
+            if (engine != null) saveHandler.postDelayed(this, 10_000L)
+        }
+    }
+
+    private fun persistPosition() {
+        val player = engine ?: return
+        val key = mediaKey ?: return
+        if (player.duration <= 0) return // Never erase on missing metadata.
+        val bookmark = WatchProgress.bookmark(player.currentPosition, player.duration)
+        watchPrefs.edit().apply {
+            if (bookmark == null) remove(key) else putLong(key, bookmark)
+        }.apply()
+    }
     private val watchPrefs by lazy { getSharedPreferences("watch_progress", MODE_PRIVATE) }
     private lateinit var screen: PlayerView
 
@@ -47,7 +66,7 @@ class PlayerActivity : Activity() {
             return
         }
         // A relative-path hash may be the same on two different PC servers.
-        mediaKey = WatchProgress.bookmarkKey(normalizedHost, id)
+        mediaKey = WatchProgress.bookmarkKeyByToken(token, id)
         val http = DefaultHttpDataSource.Factory().setDefaultRequestProperties(
             mapOf("X-DiscForge-Token" to token))
         val sourceFactory = DefaultMediaSourceFactory(DefaultDataSource.Factory(this, http))
@@ -62,7 +81,9 @@ class PlayerActivity : Activity() {
             }
         })
         player.setMediaItem(MediaItem.fromUri(url))
-        val resumeAt = watchPrefs.getLong(mediaKey!!, 0)
+        // Read older 0.1 bookmarks when upgrading an existing TV installation.
+        val oldKey = WatchProgress.bookmarkKey(normalizedHost, id)
+        val resumeAt = watchPrefs.getLong(mediaKey!!, watchPrefs.getLong(oldKey, 0L))
         if (WatchProgress.canResume(resumeAt)) {
             player.seekTo(resumeAt)
             android.widget.Toast.makeText(this, "Продолжить с сохранённого места",
@@ -71,17 +92,12 @@ class PlayerActivity : Activity() {
         player.prepare()
         player.playWhenReady = true
         screen.requestFocus()
+        saveHandler.postDelayed(saveLoop, 10_000L)
     }
 
     override fun onStop() {
-        val active = engine
-        val key = mediaKey
-        if (active != null && key != null && active.duration > 0) {
-            val bookmark = WatchProgress.bookmark(active.currentPosition, active.duration)
-            watchPrefs.edit().apply {
-                if (bookmark == null) remove(key) else putLong(key, bookmark)
-            }.apply()
-        }
+        saveHandler.removeCallbacks(saveLoop)
+        persistPosition()
         mediaKey = null
         screen.player = null
         engine?.release()
