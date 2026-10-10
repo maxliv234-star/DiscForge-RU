@@ -20,7 +20,8 @@ from typing import Callable, Sequence
 from bdmv_preflight import inspect as inspect_bdmv
 
 SUPPORTED = {'.mkv', '.mp4', '.mov', '.m2ts', '.mts', '.ts', '.avi'}
-CAPACITIES = {'BD25': 25_000_000_000, 'BD50': 50_000_000_000, 'BDXL100': 100_000_000_000}
+# Full HD 1080p authoring only; UHD/4K/BDXL are intentionally deferred.
+CAPACITIES = {'BD25': 25_000_000_000, 'BD50': 50_000_000_000}
 HDR_TRANSFERS = {'smpte2084', 'arib-std-b67'}
 
 
