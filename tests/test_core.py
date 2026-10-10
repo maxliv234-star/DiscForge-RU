@@ -121,7 +121,9 @@ class AuthoringTests(unittest.TestCase):
                     f.truncate(CAPACITIES['BD25'] + 1)
 
             with patch('core._require_binary'), patch('core.run_command', side_effect=encode), \
-                 patch('core.run_tsmuxer', side_effect=mux):
+                 patch('core.run_tsmuxer', side_effect=mux), \
+                 patch('core.bitrate_plan', return_value=5_000_000), \
+                 patch.dict(CAPACITIES, {'BD25': 100}):
                 with self.assertRaisesRegex(DiscForgeError, 'превышает'):
                     create_bluray(info, 'BD25', str(root), 'ffmpeg', 'tsmuxer', True, False,
                                   threading.Event(), lambda msg: None, lambda pct: None)
