@@ -177,7 +177,7 @@ class MainActivity : Activity() {
         busy = true
         status.text = "Подключение к домашней медиатеке…"
         worker.execute {
-            var chosen = base
+            var chosen: String = base
             var result: JSONArray? = null
             var failure: Exception? = null
             try {
