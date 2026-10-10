@@ -67,6 +67,43 @@ def parse_range(value: str | None, size: int) -> tuple[int, int, bool]:
     return start, end, True
 
 
+def open_media_safely(root: Path, file: Path):
+    """Open catalog entries without following symlinks replaced after indexing.
+
+    POSIX walks components from the library directory using directory file
+    descriptors and O_NOFOLLOW. Windows verifies the resolved path before open;
+    its fallback is best-effort against concurrent file-system mutations.
+    """
+    root = root.resolve(strict=True)
+    try:
+        relative = file.relative_to(root)
+    except ValueError as exc:
+        raise FileNotFoundError("Media outside library.") from exc
+    if not relative.parts or any(part in ("", ".", "..") for part in relative.parts):
+        raise FileNotFoundError("Invalid media path.")
+    if (os.name == "posix" and hasattr(os, "O_NOFOLLOW")
+            and hasattr(os, "O_DIRECTORY") and os.open in os.supports_dir_fd):
+        flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+        directory_fd = os.open(root, flags)
+        try:
+            for component in relative.parts[:-1]:
+                next_fd = os.open(component, flags, dir_fd=directory_fd)
+                os.close(directory_fd)
+                directory_fd = next_fd
+            fd = os.open(relative.parts[-1],
+                         os.O_RDONLY | os.O_NOFOLLOW, dir_fd=directory_fd)
+            return os.fdopen(fd, "rb")
+        finally:
+            os.close(directory_fd)
+
+    # Windows lacks portable directory-fd O_NOFOLLOW support. This check
+    # prevents common symlink escapes; don't allow untrusted media writers.
+    resolved = file.resolve(strict=True)
+    if resolved != file or not resolved.is_relative_to(root):
+        raise FileNotFoundError("Indexed media changed location.")
+    return resolved.open("rb")
+
+
 def make_handler(root: Path, token: str):
     if len(token) < 16:
         raise ValueError("Token must contain at least 16 characters")
@@ -146,7 +183,12 @@ def make_handler(root: Path, token: str):
             self.reply(404, b'{"error":"Not found"}')
 
         def send_media(self, file: Path):
-            with file.open("rb") as stream:
+            try:
+                stream = open_media_safely(root, file)
+            except OSError:
+                self.reply(404, b'{"error":"Media not found"}')
+                return
+            with stream:
                 size = os.fstat(stream.fileno()).st_size
                 try:
                     start, end, partial = parse_range(self.headers.get("Range"), size)
