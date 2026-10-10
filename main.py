@@ -176,7 +176,7 @@ class Window(QMainWindow):
         profile_box = QGroupBox('Параметры Blu-ray')
         form = QFormLayout(profile_box)
         self.profile = QComboBox()
-        self.profile.addItems(['BD25', 'BD50', 'BDXL100'])
+        self.profile.addItems(sorted(CAPACITIES))
         self.profile.setCurrentText('BD25')
         form.addRow('Ёмкость носителя:', self.profile)
         self.output_mode = QComboBox()
