@@ -9,6 +9,8 @@ from dataclasses import dataclass, asdict
 from pathlib import Path
 
 CAPACITIES = {"BD25": 25_000_000_000, "BD50": 50_000_000_000}
+# This 2D Full HD authoring path accepts BD metadata versions 1 and 2 only.
+SUPPORTED_VERSIONS = {b"0100", b"0200"}
 HEADERS = {"index.bdmv": b"INDX", "MovieObject.bdmv": b"MOBJ"}
 COLLECTIONS = {"PLAYLIST": ("*.mpls", b"MPLS"),
                "CLIPINF": ("*.clpi", b"HDMV"),
@@ -54,8 +56,13 @@ def inspect(root: Path, profile: str = "BD25") -> Report:
                 continue
             try:
                 with path.open("rb") as handle:
-                    if handle.read(4) != magic:
+                    header = handle.read(8)
+                    if header[:4] != magic:
                         errors.append(f"Invalid signature: BDMV/{name}")
+                    elif len(header) < 8:
+                        errors.append(f"Truncated version: BDMV/{name}")
+                    elif header[4:8] not in SUPPORTED_VERSIONS:
+                        errors.append(f"Unsupported Full HD metadata version: BDMV/{name}")
             except OSError as exc:
                 errors.append(f"Cannot read BDMV/{name}: {exc}")
         for name, (pattern, magic) in COLLECTIONS.items():
@@ -87,8 +94,13 @@ def inspect(root: Path, profile: str = "BD25") -> Report:
                                         errors.append(f"Missing M2TS sync at packet {index}: {path.name}")
                     elif magic is not None:
                         with path.open("rb") as handle:
-                            if handle.read(4) != magic:
+                            header = handle.read(8)
+                            if header[:4] != magic:
                                 errors.append(f"Invalid signature: BDMV/{name}/{path.name}")
+                            elif len(header) < 8:
+                                errors.append(f"Truncated version: BDMV/{name}/{path.name}")
+                            elif header[4:8] not in SUPPORTED_VERSIONS:
+                                errors.append(f"Unsupported Full HD metadata version: BDMV/{name}/{path.name}")
                 except OSError as exc:
                     errors.append(f"Cannot inspect {path.name}: {exc}")
         if not (bdmv / "BACKUP").is_dir():
