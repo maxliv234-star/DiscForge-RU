@@ -138,6 +138,56 @@ class ISOUDFFullHDTests(unittest.TestCase):
                 self.skipTest('Symlinks not available')
             self.assertFalse(udf.inspect(alias).valid)
 
+
+    def _install_reserve_vds(self, image, *, bad_main_extent=False, bad_reserve_extent=False):
+        with image.open('r+b') as handle:
+            handle.seek(32 * udf.SECTOR_SIZE)
+            original = handle.read(udf.SECTOR_SIZE)
+            crc_length = int.from_bytes(original[10:12], 'little')
+            payload = original[16:16 + crc_length]
+            handle.seek(64 * udf.SECTOR_SIZE)
+            handle.write(descriptor(6, 64, payload))
+            handle.seek(65 * udf.SECTOR_SIZE)
+            handle.write(descriptor(8, 65))
+            main_start = 400 if bad_main_extent else 32
+            reserve_start = 400 if bad_reserve_extent else 64
+            avdp = (
+                (16 * udf.SECTOR_SIZE).to_bytes(4, 'little')
+                + main_start.to_bytes(4, 'little')
+                + (16 * udf.SECTOR_SIZE).to_bytes(4, 'little')
+                + reserve_start.to_bytes(4, 'little')
+            )
+            handle.seek(256 * udf.SECTOR_SIZE)
+            handle.write(descriptor(2, 256, avdp))
+            if not bad_main_extent:
+                handle.seek(32 * udf.SECTOR_SIZE + 240)
+                handle.write(bytes([0x60]))  # Corrupt Main LVD CRC.
+
+    def test_reserve_vds_recovers_corrupted_main(self):
+        with tempfile.TemporaryDirectory() as temp:
+            image = Path(temp) / 'test.iso'
+            iso_fixture(image)
+            self._install_reserve_vds(image)
+            report = udf.inspect(image)
+            self.assertTrue(report.valid, report.errors)
+            self.assertTrue(any('Reserve VDS' in w for w in report.warnings))
+
+    def test_reserve_vds_recovers_invalid_main_extent(self):
+        with tempfile.TemporaryDirectory() as temp:
+            image = Path(temp) / 'test.iso'
+            iso_fixture(image)
+            self._install_reserve_vds(image, bad_main_extent=True)
+            self.assertTrue(udf.inspect(image).valid)
+
+    def test_rejects_when_main_and_reserve_both_invalid(self):
+        with tempfile.TemporaryDirectory() as temp:
+            image = Path(temp) / 'test.iso'
+            iso_fixture(image)
+            self._install_reserve_vds(image, bad_reserve_extent=True)
+            report = udf.inspect(image)
+            self.assertFalse(report.valid)
+            self.assertTrue(any('Main/Reserve VDS' in e for e in report.errors))
+
     def test_cli_json_exit_codes(self):
         with tempfile.TemporaryDirectory() as temp:
             image = Path(temp) / 'test.iso'
