@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Callable, Sequence
 
 from bdmv_preflight import inspect as inspect_bdmv
+from tools.iso_udf_preflight import inspect as inspect_iso
 
 SUPPORTED = {'.mkv', '.mp4', '.mov', '.m2ts', '.mts', '.ts', '.avi'}
 CAPACITIES = {'BD25': 25_000_000_000, 'BD50': 50_000_000_000, 'BDXL100': 100_000_000_000}
@@ -366,13 +367,19 @@ def create_bluray(info: MediaInfo, profile: str, output_root: str,
                 raise DiscForgeError('tsMuxer не создал каталог BDMV.')
         if size > CAPACITIES[profile]:
             raise DiscForgeError(f'Размер результата {size / 1e9:.2f} ГБ превышает {profile}. Файлы болванки не затронуты.')
-        # Never publish an invalid Full HD folder as a ready-to-burn BDMV.
-        # ISO images require a separate UDF/ISO inspection and are not certified here.
+        # Reject invalid Full HD outputs before moving them to the finished folder.
+        # This ISO preflight inspects UDF metadata only; it does NOT prove a valid
+        # directory tree, a playable BDMV, or working BD-J/HDMV menus.
         if not iso and profile in ('BD25', 'BD50'):
             report = inspect_bdmv(author_target, profile)
             if not report.structurally_valid:
                 raise DiscForgeError('Проверка BDMV не пройдена: ' + '; '.join(report.errors[:8]))
             log('Структурная проверка BDMV пройдена; совместимость с плеером не подтверждена.')
+        elif iso and profile in ('BD25', 'BD50'):
+            report = inspect_iso(author_target, profile)
+            if not report.valid:
+                raise DiscForgeError('Проверка ISO UDF 2.50 не пройдена: ' + '; '.join(report.errors[:8]))
+            log('ISO: метаданные UDF 2.50 проверены; BDMV внутри ISO и работа меню не проверены.')
         shutil.move(str(author_target), str(target))
         progress(100)
         log(f'Готово: {target} ({size/1e9:.2f} ГБ).')
