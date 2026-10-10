@@ -73,8 +73,18 @@ def inspect(root: Path, profile: str = "BD25") -> Report:
                     length = path.stat().st_size
                     if length == 0:
                         errors.append(f"Empty BDMV/{name}/{path.name}")
-                    elif magic is None and length % 192 != 0:
-                        errors.append(f"M2TS not 192-byte aligned: {path.name}")
+                    elif magic is None:
+                        if length % 192 != 0:
+                            errors.append(f"M2TS not 192-byte aligned: {path.name}")
+                        else:
+                            # Blu-ray M2TS packets: 4-byte arrival timestamp + 188-byte TS.
+                            # Sample first, middle and last packet without scanning a full BD50.
+                            count = length // 192
+                            with path.open("rb") as handle:
+                                for index in sorted({0, count // 2, count - 1}):
+                                    handle.seek(index * 192 + 4)
+                                    if handle.read(1) != b"\x47":
+                                        errors.append(f"Missing M2TS sync at packet {index}: {path.name}")
                     elif magic is not None:
                         with path.open("rb") as handle:
                             if handle.read(4) != magic:
