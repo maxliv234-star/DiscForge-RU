@@ -5,6 +5,9 @@ object WatchProgress {
     private const val MIN_WATCHED_MS = 30_000L
     private const val FINISH_MARGIN_MS = 60_000L
 
+    /** Isolate bookmarks between different LAN servers with identically named files. */
+    fun bookmarkKey(serverBase: String, mediaId: String): String = "$serverBase/api/v1/media/$mediaId"
+
     fun canResume(savedPositionMs: Long): Boolean = savedPositionMs >= MIN_WATCHED_MS
 
     /**

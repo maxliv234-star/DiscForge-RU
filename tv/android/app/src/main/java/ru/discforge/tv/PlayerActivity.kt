@@ -15,7 +15,7 @@ import androidx.media3.ui.PlayerView
 
 class PlayerActivity : Activity() {
     private var engine: ExoPlayer? = null
-    private var mediaId: String? = null
+    private var mediaKey: String? = null
     private val watchPrefs by lazy { getSharedPreferences("watch_progress", MODE_PRIVATE) }
     private lateinit var screen: PlayerView
 
@@ -46,7 +46,8 @@ class PlayerActivity : Activity() {
             finish()
             return
         }
-        mediaId = id
+        // A relative-path hash may be the same on two different PC servers.
+        mediaKey = WatchProgress.bookmarkKey(normalizedHost, id)
         val http = DefaultHttpDataSource.Factory().setDefaultRequestProperties(
             mapOf("X-DiscForge-Token" to token))
         val sourceFactory = DefaultMediaSourceFactory(DefaultDataSource.Factory(this, http))
@@ -61,7 +62,7 @@ class PlayerActivity : Activity() {
             }
         })
         player.setMediaItem(MediaItem.fromUri(url))
-        val resumeAt = watchPrefs.getLong(id, 0)
+        val resumeAt = watchPrefs.getLong(mediaKey!!, 0)
         if (WatchProgress.canResume(resumeAt)) {
             player.seekTo(resumeAt)
             android.widget.Toast.makeText(this, "Продолжить с сохранённого места",
@@ -74,14 +75,14 @@ class PlayerActivity : Activity() {
 
     override fun onStop() {
         val active = engine
-        val id = mediaId
-        if (active != null && id != null && active.duration > 0) {
+        val key = mediaKey
+        if (active != null && key != null && active.duration > 0) {
             val bookmark = WatchProgress.bookmark(active.currentPosition, active.duration)
             watchPrefs.edit().apply {
-                if (bookmark == null) remove(id) else putLong(id, bookmark)
+                if (bookmark == null) remove(key) else putLong(key, bookmark)
             }.apply()
         }
-        mediaId = null
+        mediaKey = null
         screen.player = null
         engine?.release()
         engine = null

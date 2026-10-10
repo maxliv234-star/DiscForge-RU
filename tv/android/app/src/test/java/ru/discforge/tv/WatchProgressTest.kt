@@ -7,6 +7,15 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class WatchProgressTest {
+    @Test fun bookmarksAreIsolatedPerServerAndFile() {
+        val first = WatchProgress.bookmarkKey("http://192.168.1.10:8098", "abcd1234")
+        val second = WatchProgress.bookmarkKey("http://192.168.1.20:8098", "abcd1234")
+        val third = WatchProgress.bookmarkKey("http://192.168.1.10:8098", "ffff1234")
+        assertFalse(first == second)
+        assertFalse(first == third)
+        assertEquals("http://192.168.1.10:8098/api/v1/media/abcd1234", first)
+    }
+
     @Test fun remembersAnUnfinishedFilm() {
         assertEquals(120_000L, WatchProgress.bookmark(120_000L, 3_600_000L))
         assertTrue(WatchProgress.canResume(120_000L))
