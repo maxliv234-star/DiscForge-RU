@@ -86,3 +86,26 @@ class BDMVPreflightTests(unittest.TestCase):
             result = inspect(root)
             self.assertFalse(result.structurally_valid)
             self.assertTrue(any("version" in e for e in result.errors))
+
+
+    def test_all_metadata_headers_reject_bad_versions(self):
+        for name in ("index.bdmv", "MovieObject.bdmv",
+                     "PLAYLIST/00000.mpls", "CLIPINF/00000.clpi"):
+            for suffix in (b"0300", b"02", b""):
+                with self.subTest(name=name, suffix=suffix):
+                    with tempfile.TemporaryDirectory() as temp:
+                        root = Path(temp)
+                        fixture(root)
+                        path = root / "BDMV" / name
+                        path.write_bytes(path.read_bytes()[:4] + suffix)
+                        self.assertFalse(inspect(root).structurally_valid)
+
+    def test_metadata_version_0100_supported(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            fixture(root)
+            for name in ("index.bdmv", "MovieObject.bdmv",
+                         "PLAYLIST/00000.mpls", "CLIPINF/00000.clpi"):
+                path = root / "BDMV" / name
+                path.write_bytes(path.read_bytes()[:4] + b"0100")
+            self.assertTrue(inspect(root).structurally_valid)
