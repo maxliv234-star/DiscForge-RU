@@ -4,6 +4,9 @@ on:
   pull_request:
     paths:
       - 'bdmv_preflight.py'
+      - 'tools/iso_udf_preflight.py'
+      - 'tests/test_iso_udf_preflight.py'
+      - 'tests/test_iso_pipeline.py'
       - 'core.py'
       - 'tests/test_bdmv_preflight.py'
       - '.github/workflows/windows-build.yml'
