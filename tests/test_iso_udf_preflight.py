@@ -127,6 +127,35 @@ class ISOUDFFullHDTests(unittest.TestCase):
     def test_rejects_out_of_range_vds(self):
         self.assertFalse(self.check(bad_extent=True).valid)
 
+    def test_rejects_partial_sector_vds_extent(self):
+        with tempfile.TemporaryDirectory() as temp:
+            image = Path(temp) / 'test.iso'
+            iso_fixture(image)
+            partial = (16 * udf.SECTOR_SIZE - 1).to_bytes(4, 'little')
+            main = partial + (32).to_bytes(4, 'little')
+            with image.open('r+b') as handle:
+                handle.seek(256 * udf.SECTOR_SIZE)
+                handle.write(descriptor(2, 256, main))
+            report = udf.inspect(image)
+            self.assertFalse(report.valid)
+            self.assertTrue(any('anchor' in e for e in report.errors), report.errors)
+
+    def test_reserve_vds_used_when_main_extent_is_partial(self):
+        with tempfile.TemporaryDirectory() as temp:
+            image = Path(temp) / 'test.iso'
+            iso_fixture(image)
+            self._install_reserve_vds(image, bad_main_extent=True)
+            main = ((16 * udf.SECTOR_SIZE - 1).to_bytes(4, 'little')
+                    + (32).to_bytes(4, 'little'))
+            reserve = ((16 * udf.SECTOR_SIZE).to_bytes(4, 'little')
+                       + (64).to_bytes(4, 'little'))
+            with image.open('r+b') as handle:
+                handle.seek(256 * udf.SECTOR_SIZE)
+                handle.write(descriptor(2, 256, main + reserve))
+            report = udf.inspect(image)
+            self.assertTrue(report.valid, report.errors)
+            self.assertTrue(any('Reserve VDS' in w for w in report.warnings))
+
     def test_rejects_wrong_block_size(self):
         self.assertFalse(self.check(block_size=4096).valid)
 

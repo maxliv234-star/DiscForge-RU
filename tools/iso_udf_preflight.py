@@ -86,7 +86,11 @@ def _vrs(handle, count: int) -> bool:
 def _vds_extent(block: bytes, offset: int, count: int) -> tuple[int, int] | None:
     length = int.from_bytes(block[offset:offset + 4], "little")
     start = int.from_bytes(block[offset + 4:offset + 8], "little")
-    sectors = (length + SECTOR_SIZE - 1) // SECTOR_SIZE
+    # VDS extents must cover complete logical sectors. Rounding up a partial
+    # extent could accept a descriptor outside the advertised byte range.
+    if length == 0 or length % SECTOR_SIZE:
+        return None
+    sectors = length // SECTOR_SIZE
     if 1 <= sectors <= MAX_VDS_SECTORS and start < count and sectors <= count - start:
         return start, sectors
     return None
