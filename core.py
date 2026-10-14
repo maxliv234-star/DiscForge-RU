@@ -23,6 +23,7 @@ from tools.iso_udf_preflight import inspect as inspect_iso
 from disc_menu import MenuDesign, install_menu
 from windows_iso import create_iso, pending_image
 from audio_selection import selected_tracks, select_tracks, audio_outputs, stream_map, language
+from player_profiles import PLAYER_PROFILES, G2805_COMBINED_PEAK_TARGET, encode_targets
 
 SUPPORTED = {'.mkv', '.mp4', '.mov', '.m2ts', '.mts', '.ts', '.avi'}
 CAPACITIES = {'BD25': 25_000_000_000, 'BD50': 50_000_000_000}
@@ -467,11 +468,13 @@ def create_bluray(info: MediaInfo, profile: str, output_root: str,
                    progress: Callable[[int], None],
                    chapters: Sequence[float] | None = None,
                    menu: MenuDesign | None = None, *, fast: bool = False, observer=None, processing_mode='encode', ffprobe='ffprobe',
-                   resilient=False, gpu_frames=True, verification=None, video_bitrate=None, keep_authored=False) -> Path:
+                   resilient=False, gpu_frames=True, verification=None, video_bitrate=None, keep_authored=False, player_profile='universal') -> Path:
     """Encode to BD-oriented H.264 + AC3, then author BDMV directory or image.
 
     This is the first compatible-oriented implementation, NOT independently verified BD spec compliance.
     """
+    if player_profile not in PLAYER_PROFILES:
+        raise DiscForgeError('Неизвестный профиль проигрывателя.')
     if not Path(info.path).is_file():
         raise DiscForgeError('Исходный файл не найден.')
     if info.selected_audio is not None:
@@ -542,6 +545,8 @@ def create_bluray(info: MediaInfo, profile: str, output_root: str,
     target = unique_target(root, info.name, iso)
     log(f'Профиль: {profile}, видео: {bitrate/1e6:.1f} Мбит/с, выход: {target}')
     log('Меню BD-J: перед записью проверьте воспроизведение на вашем плеере.' if menu else 'Диск без интерактивного меню.')
+    if player_profile != 'universal':
+        log('Проигрыватель: GIEC BDP-G2805 (экспериментальный профиль, не проверен физически).')
     if not copying:
         log('Предупреждение: кадры будут приведены к 23,976 fps; конвертация может повлиять на плавность.')
     else:
@@ -599,6 +604,24 @@ def create_bluray(info: MediaInfo, profile: str, output_root: str,
                     raise DiscForgeError(f'Выбранные аудиодорожки ограничивают видео до {bitrate/1e6:.2f} Мбит/с. Уменьшите битрейт общего диска или измените выбор звука; качество автоматически не снижалось.')
                 if bitrate < 5_000_000:
                     raise DiscForgeError('Выбранные звуковые дорожки не оставляют места для видео. Выберите AC-3 или BD50.')
+        player_peak = None
+        if player_profile != 'universal':
+            sound_peak = sound_bps if resilient else 640_000 * len(tracks)
+            if copying:
+                video_peak = getattr(info.copy_report, 'video_max_bps', 0) or 0
+                if video_peak == 0:
+                    log('GIEC G2805: видео копируется. Пиковый битрейт исходника не измерен; результат нужно проверить на плеере.')
+                elif video_peak + sound_peak > G2805_COMBINED_PEAK_TARGET:
+                    log('GIEC G2805: пиковый битрейт копируемых потоков выше консервативного ориентира 32 Мбит/с. Видео не изменено; совместимость проверить на плеере.')
+            else:
+                try:
+                    tuned_bitrate, player_peak = encode_targets(player_profile, bitrate, sound_peak)
+                except ValueError as exc:
+                    raise DiscForgeError(str(exc)) from exc
+                if tuned_bitrate != bitrate:
+                    log(f'GIEC G2805: битрейт видео ограничен с {bitrate/1e6:.2f} до {tuned_bitrate/1e6:.2f} Мбит/с (экспериментальный режим).')
+                    bitrate = tuned_bitrate
+                log(f'GIEC G2805: тестовые параметры AVC: {bitrate/1e6:.2f} Мбит/с, maxrate {player_peak/1e6:.2f} Мбит/с.')
         meta = work / 'project.meta'
         def report(stage, fraction):
             if verification:
@@ -612,7 +635,7 @@ def create_bluray(info: MediaInfo, profile: str, output_root: str,
             progress(value)
             report('encode', value/90)
         encode_key = [source_key, tools_key, selected_mode, bitrate, nvenc, fast, gpu_frames, info.selected_audio,
-                      info.audio_modes, [(str(p.name), s) for p, s in audio], 1]
+                      info.audio_modes, [(str(p.name), s) for p, s in audio], 1] + ([player_profile] if player_profile != 'universal' else [])
         encoded_paths = [video, *(p for p, _ in audio)]
         from truehd_audio import paths as truehd_paths, interleave
         for p, s in audio:
@@ -626,6 +649,10 @@ def create_bluray(info: MediaInfo, profile: str, output_root: str,
             if resilient:
                 if not copying:
                     command[command.index('-maxrate')+1] = str(min(30_000_000, 44_000_000-sound_bps))
+            if player_peak is not None and not copying:
+                command[command.index('-maxrate')+1] = str(player_peak)
+                command[command.index('-bufsize')+1] = str(player_peak)
+            if resilient:
                 if nvenc and gpu_frames and not copying:
                     from gpu_pipeline import supported, cuda_command
                     if supported(info, ffmpeg, cancel, log, run_command, make_video_command):

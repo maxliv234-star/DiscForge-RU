@@ -189,6 +189,7 @@ def create_collection(jobs, config, profile, as_iso, nvenc, cancel, log, progres
             cancel, log, lambda v: progress((i+v/100)*85/len(jobs)), chapters=chapters, menu=film_design,
             fast=fast, processing_mode=mode, ffprobe=config.get('ffprobe', 'ffprobe'), resilient=True,
             gpu_frames=config.get('gpu_frames', True), verification=verification, video_bitrate=rates.get(str(Path(media.path).resolve()), bitrate), keep_authored=True,
+            player_profile=config.get('player_profile', 'universal'),
             observer=(lambda stage, fraction: timing(f'Фильм {i+1}/{len(jobs)} · {stage}', -1)) if timing else None)
         sources.append(source)
         reports.append(json.loads((source.parent/'collection-title-verification.json').read_text(encoding='utf-8')))

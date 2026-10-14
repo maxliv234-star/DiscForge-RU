@@ -10,6 +10,7 @@ import sys
 import threading
 
 from core import CAPACITIES, DiscForgeError, create_bluray, probe_media
+from player_profiles import PLAYER_PROFILES
 
 
 def _chapter(value: str) -> float:
@@ -35,6 +36,8 @@ def main(argv: list[str] | None = None) -> int:
     b = sub.add_parser('build', help='Собрать ISO/BDMV; меню включается через --menu-title')
     b.add_argument('file')
     b.add_argument('--profile', choices=sorted(CAPACITIES), default='BD25')
+    b.add_argument('--player', choices=sorted(PLAYER_PROFILES), default='universal',
+                   help='Профиль проигрывателя (giec-g2805 экспериментальный)')
     b.add_argument('--output', default='DiscForge_Output')
     b.add_argument('--ffmpeg', default='ffmpeg')
     b.add_argument('--ffprobe', default='ffprobe')
@@ -82,7 +85,8 @@ def main(argv: list[str] | None = None) -> int:
             done = create_bluray(info, args.profile, args.output, args.ffmpeg, args.tsmuxer,
                                  not args.folder, args.nvenc, threading.Event(), print,
                                  lambda n: print(f'\r{n:.0f}% ', end='', flush=True), chapters, menu,
-                                 processing_mode=args.processing, ffprobe=args.ffprobe, resilient=True, gpu_frames=not args.cpu_filters)
+                                 processing_mode=args.processing, ffprobe=args.ffprobe, resilient=True, gpu_frames=not args.cpu_filters,
+                                  player_profile=args.player)
             print('\nРезультат:', done)
         return 0
     except (DiscForgeError, OSError, ValueError, RuntimeError) as exc:

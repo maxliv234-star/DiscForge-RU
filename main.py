@@ -238,6 +238,7 @@ class BuildThread(QThread):
                     resilient=True, gpu_frames=self.config.get('gpu_frames', True),
                     verification=verification,
                     video_bitrate=self.config.get('video_rates', {}).get(str(Path(media.path).resolve())),
+                    player_profile=self.config.get('player_profile', 'universal'),
                 )
                 self.item_done.emit(media.path, str(target))
             except Exception as exc:
@@ -401,6 +402,14 @@ class Window(QMainWindow):
         self.profile.addItems(list(CAPACITIES))
         self.profile.setCurrentText('BD25')
         form.addRow('Ёмкость носителя:', self.profile)
+        from player_profiles import PLAYER_PROFILES
+        self.player_profile = QComboBox()
+        for player_key, player_name in PLAYER_PROFILES.items():
+            self.player_profile.addItem(player_name, player_key)
+        self.player_profile.setToolTip(
+            'GIEC G2805: экспериментальные ограничения видеокодирования. '
+            'Совместимость BD-J на записанном диске требует проверки на плеере.')
+        form.addRow('Проигрыватель:', self.player_profile)
         self.output_mode = QComboBox()
         self.output_mode.addItems(['ISO-образ', 'Папка BDMV'])
         form.addRow('Формат результата:', self.output_mode)
@@ -1258,6 +1267,7 @@ class Window(QMainWindow):
         config['movie_names'] = dict(self.movie_names)
         config['collection_bitrate'] = self.collection_bitrate.value()*1_000_000
         config['video_rates'] = self._video_rates()
+        config['player_profile'] = self.player_profile.currentData()
         self._save_config()
         if not config['output']:
             QMessageBox.warning(self, 'Выходная папка', 'Укажите выходную папку.')
@@ -1283,6 +1293,9 @@ class Window(QMainWindow):
             f'Дисков: {1 if config["collection"] else len(jobs)} · Фильмов: {len(jobs)} · {self.profile.currentText()} · {self.output_mode.currentText()}\n'
             + ('Меню: смотреть фильм и выбирать главы.\n' if menu else 'Без интерактивного меню.\n')
             + 'Режим: ' + self.processing_mode.currentText() + '\n'
+            + 'Проигрыватель: ' + self.player_profile.currentText() + '\n'
+            + ('GIEC: при перекодировании возможен явный лимит битрейта; профиль ещё не проверен на устройстве.\n'
+               if self.player_profile.currentData() == 'giec-g2805' else '')
             + '\n'.join(movie_title(info.path, self.movie_names) + ': ' + self._build_video_description(info, config) for info, _ in jobs) + '\n'
             + 'Выбранные субтитры войдут в ISO отдельными дорожками. Исходники сохраняются.\n\nНачать сборку?',
             QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
@@ -1388,7 +1401,7 @@ class Window(QMainWindow):
                 'movie_names': dict(self.movie_names),
                 'bitrate_policy': self.bitrate_policy.currentData(), 'bitrate_overrides': dict(self.bitrate_overrides),
                 'subtitles': self.subtitle_selections, 'audio': self.audio_selections, 'audio_modes': self.audio_modes, 'gpu_frames': self.gpu_frames.isChecked(), 'chapters': self.chapters, 'chapter_names': self.chapter_names, 'profile': self.profile.currentText(),
-                'collection': self.disc_mode.currentIndex() == 0, 'collection_bitrate': self.collection_bitrate.value(),
+                'collection': self.disc_mode.currentIndex() == 0, 'collection_bitrate': self.collection_bitrate.value(), 'player_profile': self.player_profile.currentData(),
                 'encoder': self.encoder.currentIndex(), 'encode_speed': self.encode_speed.currentIndex(), 'processing_mode': MODES[self.processing_mode.currentIndex()], 'output': self.output_folder.text().strip(), 'as_iso': self.output_mode.currentIndex() == 0}
 
     def save_project(self) -> None:
@@ -1421,6 +1434,10 @@ class Window(QMainWindow):
             profile = data.get('profile', 'BD25')
             if not isinstance(profile, str) or profile not in CAPACITIES:
                 raise ValueError('Неизвестный профиль диска')
+            from player_profiles import PLAYER_PROFILES
+            player_profile = data.get('player_profile', 'universal')
+            if not isinstance(player_profile, str) or player_profile not in PLAYER_PROFILES:
+                raise ValueError('Неизвестный профиль проигрывателя')
             title = data.get('title', 'Мой Blu-ray')
             menu = data.get('menu', {'enabled': False, 'theme': 'midnight'})
             if not isinstance(menu, dict) or not isinstance(menu.get('enabled'), bool):
@@ -1490,6 +1507,7 @@ class Window(QMainWindow):
             self.menu_editor.apply_design(design)
             self.menu_editor.enabled.setChecked(menu['enabled'])
             self.profile.setCurrentText(profile)
+            self.player_profile.setCurrentIndex(self.player_profile.findData(player_profile))
             self.disc_mode.setCurrentIndex(0 if data.get('collection') is True else 1)
             rate = data.get('collection_bitrate', 12)
             self.collection_bitrate.setValue(rate if type(rate) is int and 5 <= rate <= 28 else 12)
@@ -1534,6 +1552,7 @@ class Window(QMainWindow):
         self.menu_editor.apply_design(MenuDesign('Моя коллекция Blu-ray'))
         self.menu_editor.enabled.setChecked(True)
         self.processing_mode.setCurrentIndex(0)
+        self.player_profile.setCurrentIndex(self.player_profile.findData('universal'))
         self.disc_mode.setCurrentIndex(0)
         self.collection_bitrate.setValue(12)
         self.bitrate_policy.setCurrentIndex(0)
