@@ -26,3 +26,17 @@ jobs:
         with:
           name: DiscForge-RU-macOS-unsigned
           path: DiscForge-RU-macOS.zip
+      - name: Build standalone macOS burn CLI
+        run: python -m PyInstaller --clean --noconfirm --onefile --console --hidden-import tools.macos_mounted_bdmv --name DiscForge-RU-burn macos_burn.py
+      - name: Smoke-test packaged burner without hardware
+        run: |
+          dist/DiscForge-RU-burn --help
+          python -c 'import subprocess; p = subprocess.run(["dist/DiscForge-RU-burn", "check", "/tmp/discforge-missing-image.iso"], capture_output=True, text=True); assert p.returncode == 1 and "ОШИБКА:" in p.stderr, (p.returncode, p.stderr)'
+      - name: Check frozen burner with synthetic UDF images
+        run: python tests/smoke_macos_burn_cli.py dist/DiscForge-RU-burn
+      - name: Pack standalone burner
+        run: ditto -c -k --sequesterRsrc --keepParent dist/DiscForge-RU-burn DiscForge-RU-burn-macOS.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DiscForge-RU-macOS-burn-unsigned
+          path: DiscForge-RU-burn-macOS.zip
